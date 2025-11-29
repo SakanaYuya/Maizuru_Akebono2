@@ -18,8 +18,9 @@ def capture_and_display():
             print("Error: Could not read frame.")
             break
 
-        # Display the frame
-        cv2.imshow('Camera Feed', frame)
+        # Display the rotated frame
+        rotated_frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+        cv2.imshow('Camera Feed', rotated_frame)
 
         # Break the loop if 'q' is pressed
         if cv2.waitKey(1) & 0xFF == ord('q'):
