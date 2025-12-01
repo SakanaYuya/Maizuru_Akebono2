@@ -15,7 +15,7 @@
 
 > 岩本 千尋　**[Fab]**
 
-> 坂田 雄哉　**[Repository　host]**
+> 坂田 雄哉　**[PG (Repository　host)]**
 
 ## Commit Rules
 コミットメッセージの初めには必ず prefix をつける様にしましょう．  
