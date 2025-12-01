@@ -1,21 +1,21 @@
 # Maizuru_Akebono2
 廃炉ロボコン2025における舞鶴高専チーム"あけぼの"リポジトリ
 ## Team Members
-> 名倉 時春 **[Reader]**
+> 名倉 時春  **[Reader]**
 
-> 山城 喬楽 **[CAD]**
+> 山城 喬楽  **[CAD]**
 
-> 内橋慧悟 **[ECD]**
+> 内橋慧悟   **[ECD]**
 
-> 北条 博輝 **[CAD]**
+> 北条 博輝  **[CAD]**
 
-> 宮川 颯季 **[Fitter]**
+> 宮川 颯季  **[Fitter]**
 
-> 和泉穂花 **[Fitter]**
+> 和泉穂花   **[Fitter]**
 
-> 岩本千尋 **[Fab]**
+> 岩本千尋   **[Fab]**
 
-> 坂田 雄哉 **[Repository　host]**
+> 坂田 雄哉  **[Repository　host]**
 
 ## Commit Rules
 コミットメッセージの初めには必ず prefix をつける様にしましょう．  
