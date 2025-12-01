@@ -1,19 +1,19 @@
 # Maizuru_Akebono2
 廃炉ロボコン2025における舞鶴高専チーム"あけぼの"リポジトリ
-## Team members
+## Team Members
 > 名倉 時春 **[Reader]**
 
-> 山城 喬楽
+> 山城 喬楽 **[CAD]**
 
-> 内橋慧悟
+> 内橋慧悟 **[ECD]**
 
-> 北条 博輝
+> 北条 博輝 **[CAD]**
 
-> 宮川 颯季
+> 宮川 颯季 **[Fitter]**
 
-> 和泉穂花
+> 和泉穂花 **[Fitter]**
 
-> 岩本千尋
+> 岩本千尋 **[Fab]**
 
 > 坂田 雄哉 **[Repository　host]**
 
