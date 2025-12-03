@@ -3,7 +3,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)
 ![License](https://img.shields.io/github/license/Yuura/Maizuru_Akebono2)
-
+![Raspberry Pi](https://img.shields.io/badge/Raspberry%20Pi-OS-C51A4A?logo=raspberrypi&logoColor=white)
 
 ## Team Members
 > 名倉 時春　**[Reader]**
@@ -40,8 +40,7 @@
 | chore    | ビルド、補助ツール、ライブラリ関連                      |
 
 # How to Use
-winodws環境版とRaspberry Pi版それぞれの環境で動作するプログラムを以下に記載しています。
-
+winodws環境版とRaspberry Pi版それぞれの環境で動作するプログラムを以下に記載しています。  
 動作の際は、自身が実行する環境に合わせたプログラムで確認を行ってください。
 ## Windows 環境
 * [環境セットアップ](#環境セットアップ)
