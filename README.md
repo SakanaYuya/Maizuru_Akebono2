@@ -71,11 +71,14 @@ cd Maizuru_Akebono2
 Python 3.10以上がインストールされていることを確認してください。
 
 #### 仮想環境の構築
-次に、プロジェクト用の仮想環境を作成し、有効化します。これにより、プロジェクトごとのライブラリ管理が容易になります。
+Windowsでは、システムにインストールされている他のPythonライブラリとの競合を避けるため、プロジェクトごとに仮想環境を作成することが強く推奨されます。
+
+以下のコマンドで、プロジェクト用の仮想環境 (`venv`) を作成し、有効化します。
 ```bash
 python -m venv venv
 .\venv\Scripts\activate
 ```
+プロンプトの先頭に `(venv)` と表示されれば、仮想環境が有効になっています。
 
 #### ライブラリのインストール
 このプロジェクトでは、主に以下のライブラリを使用します。
@@ -85,7 +88,7 @@ python -m venv venv
 以下のコマンドで、必要なライブラリをまとめてインストールします。
 ```bash
 pip install opencv-python pygame
-```
+```　
 もしくは、リポジトリに含まれる`requirements.txt`ファイルを使ってインストールすることも可能です。
 ```bash
 pip install -r requirements.txt
@@ -118,8 +121,39 @@ PCに接続されたカメラの映像を表示します。
 
 # Raspberry Pi
 ## 環境セットアップ
+Raspberry Pi環境で本リポジトリのプログラムを動作させるためのセットアップ手順です。開発環境の汚染を防ぐため、Windowsと同様に仮想環境の利用を推奨します。
 
-(末尾)ソースコードリンク
+### 1. リポジトリのクローン
+```bash
+git clone https://github.com/Yuura/Maizuru_Akebono2.git
+cd Maizuru_Akebono2
+```
+
+### 2. Python環境の構築とライブラリのインストール
+#### Pythonの準備
+Raspberry Pi OSにはPythonがプリインストールされています。バージョンが3.10以上であることを確認してください。
+```bash
+python3 --version
+```
+
+#### 仮想環境の構築
+以下のコマンドで仮想環境を作成し、有効化します。
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+プロンプトの先頭に `(venv)` と表示されれば、仮想環境が有効になっています。
+#### ライブラリのインストール
+Windows環境と同様のライブラリをインストールします。
+```bash
+pip install opencv-python pygame
+```
+もしくは、リポジトリに含まれる`requirements.txt`ファイルを使用します。
+```bash
+pip install -r requirements.txt
+```
+
+これで、Raspberry Pi環境での基本的なセットアップは完了です。
 ## コントローラー操作
 
 (末尾)ソースコードリンク
