@@ -1,5 +1,10 @@
 # Maizuru_Akebono2
 廃炉ロボコン2025における舞鶴高専チーム**あけぼの**リポジトリ
+
+![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)
+![License](https://img.shields.io/github/license/Yuura/Maizuru_Akebono2)
+
+
 ## Team Members
 > 名倉 時春　**[Reader]**
 
