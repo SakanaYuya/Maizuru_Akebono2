@@ -96,6 +96,74 @@ pip install -r requirements.txt
 
 これで、Windows環境での基本的なセットアップは完了です。
 ## コントローラー操作
+> **背面ボタン**
+>>Button 4 pressed.       :LB/5 押す
+>>Button 4 released.      :LB/5 離す
+>>Axis 4: -1.0000         :LT/7 最奥?
+>>Axis 4: -1.0000         :LT/7 最手前?
+>>Button 5 pressed.       :RB/6 押す
+>>Button 5 released.      :RT/8 離す
+>>Axis 5: -1.0000         :RT/8 最奥?
+>>Axis 5: 1.0000          :RT/8 最手前?
+>**ABXY入力**
+>>Button 2 pressed.       :Xボタン 押す
+>>Button 2 released.      :Xボタン 離す
+>>Button 3 pressed.       :Yボタン 押す
+>>Button 3 released.      :Yボタン 離す
+>>Button 1 pressed.       :Bボタン 押す
+>>Button 1 released.      :Bボタン 離す
+>>Button 0 pressed.       :Aボタン 押す
+>>Button 0 released.      :Aボタン 離す
+>**十字スティック**
+>>Hat 0: (-1, 0)          :左ボタン 押す
+>>Hat 0: (0, 0)           :左ボタン 離す
+>>Hat 0: (0, 1)           :上ボタン 押す
+>>Hat 0: (0, 0)           :上ボタン 離す
+>>Hat 0: (1, 0)           :右ボタン 押す
+>>Hat 0: (0, 0)           :右ボタン 離す
+>>Hat 0: (0, -1)          :下ボタン 押す
+>>Hat 0: (0, 0)           :下ボタン 離す
+>**特殊ボタン**
+>>Button 7 pressed.       :START 押す
+>>Button 7 released.      :START 離す
+>>Button 6 pressed.       :BACK 押す
+>>Button 6 released.      :BACK 離す
+>>Button 10 pressed.      :センター 押す
+>>Button 10 released.     :センター 離す
+
+>**左スティック**
+>>Button 8 pressed.         :ステック 押す
+>>Button 8 released.        :ステック 離す
+>>* 左右 (X軸)              : Axis 0
+>>* 中央                    : 0.0
+>>* 左最大                  : -1.0
+>>* 右最大                  : 1.0
+>>* 上下 (Y軸)              : Axis 1
+>> * 中央                   : 0.0
+>> * 上最大                 : -1.0
+>> * 下最大                 : 1.0
+>**右スティック**
+>>Button 9 pressed.         :ステック 押す
+>>Button 9 pressed.         :ステック 離す
+>>* 左右 (X軸)              : Axis 2
+>> * 中央                   : 0.0
+>> * 左最大                 : -1.0
+>> * 右最大                 : 1.0
+>>* 上下 (Y軸)              : Axis 3
+>> * 中央                   : 0.0
+>> * 上最大                 : -1.0
+>> * 下最大                 : 1.0
+>>
+>>
+>>
+>>
+>>
+>>
+>>
+>>
+>>
+>>
+>>
 
 (末尾)ソースコードリンク
 ## カメラ動作確認
