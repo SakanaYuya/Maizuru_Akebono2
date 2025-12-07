@@ -227,3 +227,5 @@ pip install -r requirements.txt
 (末尾)ソースコードリンク
 ## カメラ動作
 (末尾)ソースコードリンク
+
+raspdev1を作成
