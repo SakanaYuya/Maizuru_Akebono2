@@ -1,3 +1,4 @@
+#rasp1_V3
 import cv2
 import socket
 import threading
@@ -89,6 +90,46 @@ def receive_control():
                             elif command == "RIGHT":
                                 pass
                             elif command == "STOP":
+                                pass
+                            elif command == "DPAD_UP":
+                                pass
+                            elif command == "DPAD_DOWN":
+                                pass
+                            elif command == "DPAD_LEFT":
+                                pass
+                            elif command == "DPAD_RIGHT":
+                                pass
+                            elif command == "BUTTON_A":
+                                pass
+                            elif command == "BUTTON_B":
+                                pass
+                            elif command == "BUTTON_X":
+                                pass
+                            elif command == "BUTTON_Y":
+                                pass
+                            elif command == "TRIGGER_LT":
+                                pass
+                            elif command == "TRIGGER_RT":
+                                pass
+                            elif command == "RS_FORWARD":
+                                pass
+                            elif command == "RS_BACK":
+                                pass
+                            elif command == "RS_LEFT":
+                                pass
+                            elif command == "RS_RIGHT":
+                                pass
+                            elif command == "BUTTON_LB":
+                                pass
+                            elif command == "BUTTON_RB":
+                                pass
+                            elif command == "BUTTON_BACK":
+                                pass
+                            elif command == "BUTTON_START":
+                                pass
+                            elif command == "BUTTON_LS_PRESS":
+                                pass
+                            elif command == "BUTTON_RS_PRESS":
                                 pass
 
                 except Exception as e:
