@@ -308,10 +308,10 @@ class ControllerClientGUI:
         
         # 左スティックによる移動コマンドは、他の明示的な入力がない場合に優先
         if current_command == "STOP":
-            if ly < -0.5: current_command = "FORWARD"
-            elif ly > 0.5: current_command = "BACK"
-            elif lx < -0.5: current_command = "LEFT"
-            elif lx > 0.5: current_command = "RIGHT"
+            if ly < -0.5: current_command = "LS_FORWARD"
+            elif ly > 0.5: current_command = "LS_BACK"
+            elif lx < -0.5: current_command = "LS_LEFT"
+            elif lx > 0.5: current_command = "LS_RIGHT"
         
         # 右スティックによる移動コマンド
         # 左スティックのコマンドが生成されていない場合のみ考慮

@@ -1,4 +1,4 @@
-#rasp1_V3
+#rasp1_V4
 import cv2
 import socket
 import threading
@@ -81,13 +81,13 @@ def receive_control():
                             
                             # --- ここにGPIO制御を書く ---
                             # (状態が変わった瞬間だけGPIOを操作すればよいので効率的です)
-                            if command == "FORWARD":
+                            if command == "LS_FORWARD":
                                 pass # GPIO.output(...)
-                            elif command == "BACK":
+                            elif command == "LS_BACK":
                                 pass
-                            elif command == "LEFT":
+                            elif command == "LS_LEFT":
                                 pass
-                            elif command == "RIGHT":
+                            elif command == "LS_RIGHT":
                                 pass
                             elif command == "STOP":
                                 pass
