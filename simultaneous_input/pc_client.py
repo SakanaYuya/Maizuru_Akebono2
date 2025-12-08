@@ -79,7 +79,7 @@ class ControllerClientGUI:
         try:
             print(f"[*] 接続試行中... {RPI_IP}:{CONTROL_PORT}")
             self.tcp_sock.connect((RPI_IP, CONTROL_PORT))
-            print("[*] 接続成功！コントローラーまたはWASDキーで操作してください")
+            print("[*] 接続成功!コントローラーで操作してください")
         except Exception as e:
             print(f"[!] ラズパイへの接続に失敗しました: {e}")
             print("[!] ラズパイ側を先に起動してください。")
