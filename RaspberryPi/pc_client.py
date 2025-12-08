@@ -5,6 +5,7 @@ import threading
 import pygame
 import time
 import tkinter as tk
+import json
 from tkinter import ttk
 import math
 
@@ -65,7 +66,7 @@ class ControllerClientGUI:
         self.indicators = {}
         self.stick_coords = {}
         self.trigger_coords = {}
-        self.last_command = "" # 最後の送信コマンドを記憶
+        self.last_sent_data = json.dumps({}) # 最後の送信データを記憶 (JSON形式)
 
         # --- Pygameの初期化 ---
         pygame.init()
@@ -207,7 +208,8 @@ class ControllerClientGUI:
         self.canvas.coords(self.indicators[name], bg_x1, new_y1, bg_x2, bg_y2)
 
     def update_gui(self):
-        current_command = "STOP" # デフォルトは停止
+        controller_data = {} # コントローラーからの入力データを格納
+        keyboard_data = {}   # キーボードからの入力データを格納
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -235,14 +237,21 @@ class ControllerClientGUI:
         # Sticks
         lx, ly = (self.joystick.get_axis(i) for i in range(2))
         self.move_stick_indicator("LS", lx, ly)
+        controller_data["LS_X"] = lx
+        controller_data["LS_Y"] = ly
+
         rx, ry = (self.joystick.get_axis(i) for i in range(2, 4))
         self.move_stick_indicator("RS", rx, ry)
+        controller_data["RS_X"] = rx
+        controller_data["RS_Y"] = ry
 
         # Stick Presses
         ls_press = self.joystick.get_button(8)
         rs_press = self.joystick.get_button(9)
         self.set_stick_press_state("LS_PRESS", ls_press)
         self.set_stick_press_state("RS_PRESS", rs_press)
+        controller_data["LS_PRESS"] = bool(ls_press)
+        controller_data["RS_PRESS"] = bool(rs_press)
 
         # Buttons
         for i in range(self.joystick.get_numbuttons()):
@@ -250,29 +259,7 @@ class ControllerClientGUI:
             if button_name:
                 is_pressed = self.joystick.get_button(i)
                 self.set_indicator_state(button_name, is_pressed)
-
-                # コマンド生成
-                if is_pressed:
-                    if button_name == "A":
-                        current_command = "BUTTON_A"
-                    elif button_name == "B":
-                        current_command = "BUTTON_B"
-                    elif button_name == "X":
-                        current_command = "BUTTON_X"
-                    elif button_name == "Y":
-                        current_command = "BUTTON_Y"
-                    elif button_name == "LB":
-                        current_command = "BUTTON_LB"
-                    elif button_name == "RB":
-                        current_command = "BUTTON_RB"
-                    elif button_name == "BACK":
-                        current_command = "BUTTON_BACK"
-                    elif button_name == "START":
-                        current_command = "BUTTON_START"
-                    elif button_name == "LS_PRESS":
-                        current_command = "BUTTON_LS_PRESS"
-                    elif button_name == "RS_PRESS":
-                        current_command = "BUTTON_RS_PRESS"
+                controller_data[f"BUTTON_{button_name}"] = bool(is_pressed)
 
         # Triggers
         lt_val, rt_val = 0.0, 0.0
@@ -281,12 +268,8 @@ class ControllerClientGUI:
             rt_val = self.joystick.get_axis(5)
             self.update_trigger_indicator("LT", lt_val)
             self.update_trigger_indicator("RT", rt_val)
-            
-            # コマンド生成
-            if lt_val > 0.5: 
-                current_command = "TRIGGER_LT"
-            elif rt_val > 0.5: 
-                current_command = "TRIGGER_RT"
+            controller_data["TRIGGER_LT"] = lt_val
+            controller_data["TRIGGER_RT"] = rt_val
 
         # Hat (十字キー)
         if self.joystick.get_numhats() > 0:
@@ -295,56 +278,34 @@ class ControllerClientGUI:
             self.set_indicator_state("HAT_DOWN", hat_y == -1)
             self.set_indicator_state("HAT_LEFT", hat_x == -1)
             self.set_indicator_state("HAT_RIGHT", hat_x == 1)
+            controller_data["HAT_X"] = hat_x
+            controller_data["HAT_Y"] = hat_y
+        
+        # キーボード入力
+        keys = pygame.key.get_pressed()
+        keyboard_data["W"] = bool(keys[pygame.K_w])
+        keyboard_data["A"] = bool(keys[pygame.K_a])
+        keyboard_data["S"] = bool(keys[pygame.K_s])
+        keyboard_data["D"] = bool(keys[pygame.K_d])
+        
+        # 全ての入力データを結合し、JSON形式で送信
+        combined_data = {
+            "controller": controller_data,
+            "keyboard": keyboard_data
+        }
+        json_to_send = json.dumps(combined_data)
 
-            # コマンド生成
-            if hat_y == 1:
-                current_command = "DPAD_UP"
-            elif hat_y == -1:
-                current_command = "DPAD_DOWN"
-            elif hat_x == -1:
-                current_command = "DPAD_LEFT"
-            elif hat_x == 1:
-                current_command = "DPAD_RIGHT"
-        
-        # 左スティックによる移動コマンドは、他の明示的な入力がない場合に優先
-        if current_command == "STOP":
-            if ly < -0.5: current_command = "LS_FORWARD"
-            elif ly > 0.5: current_command = "LS_BACK"
-            elif lx < -0.5: current_command = "LS_LEFT"
-            elif lx > 0.5: current_command = "LS_RIGHT"
-        
-        # 右スティックによる移動コマンド
-        # 左スティックのコマンドが生成されていない場合のみ考慮
-        if current_command == "STOP": # 左スティックで何もコマンドが生成されていない場合
-            if ry < -0.5: current_command = "RS_FORWARD"
-            elif ry > 0.5: current_command = "RS_BACK"
-            elif rx < -0.5: current_command = "RS_LEFT"
-            elif rx > 0.5: current_command = "RS_RIGHT"
-
-        # キーボード入力 (コントローラーがない場合、または併用する場合)
-        if current_command == "STOP": # コントローラーからの明示的なコマンドがない場合
-            keys = pygame.key.get_pressed()
-            if keys[pygame.K_w]:
-                current_command = "FORWARD"
-            elif keys[pygame.K_s]:
-                current_command = "BACK"
-            elif keys[pygame.K_a]:
-                current_command = "LEFT"
-            elif keys[pygame.K_d]:
-                current_command = "RIGHT"
-        
-        # 前回のコマンドと異なる場合のみ送信
-        if self.tcp_sock and current_command != self.last_command:
-            msg = current_command + "\n"
+        # 前回の送信データと異なる場合のみ送信
+        if self.tcp_sock and json_to_send != self.last_sent_data:
             try:
-                self.tcp_sock.sendall(msg.encode('utf-8'))
-                self.last_command = current_command
-                # print(f"送信コマンド: {current_command}") # デバッグ用
+                # print(f"送信データ: {json_to_send}") # デバッグ用
+                self.tcp_sock.sendall((json_to_send + "\n").encode('utf-8'))
+                self.last_sent_data = json_to_send
             except Exception as e:
                 print(f"送信エラー: {e}")
-                if self.tcp_sock: # エラーが発生したらソケットを閉じる
+                if self.tcp_sock:
                     self.tcp_sock.close()
-                self.tcp_sock = None # ソケットを無効化
+                self.tcp_sock = None
         
         self.root.after(16, self.update_gui) # 約60FPS
 

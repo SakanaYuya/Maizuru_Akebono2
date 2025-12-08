@@ -1,8 +1,9 @@
-#rasp1_V4
+#rasp1_5
 import cv2
 import socket
 import threading
 import time
+import json
 
 # --- 設定 ---
 # PCのIP (映像の投げ先)
@@ -54,8 +55,8 @@ def receive_control():
         print(f"[*] PC接続: {addr}")
         
         with conn:
-            # ★追加: 直前のコマンドを記憶する変数
-            last_command = None
+            # ★追加: 直前の受信データを記憶する変数 (JSONデータ全体を比較)
+            last_received_data = None
             
             while True:
                 try:
@@ -63,74 +64,106 @@ def receive_control():
                     if not data:
                         break
                     
-                    # 受信データを文字列に変換し、改行で分割してリストにする
-                    # (TCPは "STOP\nSTOP\n" のようにまとめて届くことがあるため)
-                    commands_list = data.decode('utf-8').split('\n')
-
-                    for command in commands_list:
-                        command = command.strip()
+                    # 受信データをUTF-8でデコード
+                    received_json_str = data.decode('utf-8').strip()
+                    
+                    # 空文字はスキップ
+                    if not received_json_str:
+                        continue
+                    
+                    try:
+                        current_data = json.loads(received_json_str)
+                    except json.JSONDecodeError:
+                        print(f"JSONデコードエラー: {received_json_str}")
+                        continue
+                    
+                    # 受信データが前回と異なる場合のみ処理
+                    if current_data != last_received_data:
+                        print(f"受信データ: {current_data}")
+                        last_received_data = current_data
                         
-                        # 空文字はスキップ
-                        if not command:
-                            continue
-                        
-                        # ★変更点: コマンドが変わった時だけ処理・表示する
-                        if command != last_command:
-                            print(f"受信コマンド: {command}")
-                            last_command = command
+                        controller_data = current_data.get("controller", {})
+                        keyboard_data = current_data.get("keyboard", {})
                             
-                            # --- ここにGPIO制御を書く ---
-                            # (状態が変わった瞬間だけGPIOを操作すればよいので効率的です)
-                            if command == "LS_FORWARD":
-                                pass # GPIO.output(...)
-                            elif command == "LS_BACK":
-                                pass
-                            elif command == "LS_LEFT":
-                                pass
-                            elif command == "LS_RIGHT":
-                                pass
-                            elif command == "STOP":
-                                pass
-                            elif command == "DPAD_UP":
-                                pass
-                            elif command == "DPAD_DOWN":
-                                pass
-                            elif command == "DPAD_LEFT":
-                                pass
-                            elif command == "DPAD_RIGHT":
-                                pass
-                            elif command == "BUTTON_A":
-                                pass
-                            elif command == "BUTTON_B":
-                                pass
-                            elif command == "BUTTON_X":
-                                pass
-                            elif command == "BUTTON_Y":
-                                pass
-                            elif command == "TRIGGER_LT":
-                                pass
-                            elif command == "TRIGGER_RT":
-                                pass
-                            elif command == "RS_FORWARD":
-                                pass
-                            elif command == "RS_BACK":
-                                pass
-                            elif command == "RS_LEFT":
-                                pass
-                            elif command == "RS_RIGHT":
-                                pass
-                            elif command == "BUTTON_LB":
-                                pass
-                            elif command == "BUTTON_RB":
-                                pass
-                            elif command == "BUTTON_BACK":
-                                pass
-                            elif command == "BUTTON_START":
-                                pass
-                            elif command == "BUTTON_LS_PRESS":
-                                pass
-                            elif command == "BUTTON_RS_PRESS":
-                                pass
+                        # --- ジョイスティック入力の処理 ---
+                        # アナログスティック (例: 左スティックのY軸)
+                        ls_y = controller_data.get("LS_Y", 0.0)
+                        ls_x = controller_data.get("LS_X", 0.0)
+                        if ls_y < -0.5:
+                            print("ジョイスティック: 左スティック前進")
+                        elif ls_y > 0.5:
+                            print("ジョイスティック: 左スティック後退")
+                        
+                        if ls_x < -0.5:
+                            print("ジョイスティック: 左スティック左")
+                        elif ls_x > 0.5:
+                            print("ジョイスティック: 左スティック右")
+
+                        rs_y = controller_data.get("RS_Y", 0.0)
+                        rs_x = controller_data.get("RS_X", 0.0)
+                        if rs_y < -0.5:
+                            print("ジョイスティック: 右スティック前進")
+                        elif rs_y > 0.5:
+                            print("ジョイスティック: 右スティック後退")
+                        
+                        if rs_x < -0.5:
+                            print("ジョイスティック: 右スティック左")
+                        elif rs_x > 0.5:
+                            print("ジョイスティック: 右スティック右")
+
+                        # スティック押下
+                        if controller_data.get("LS_PRESS"):
+                            print("ジョイスティック: 左スティック押下")
+                        if controller_data.get("RS_PRESS"):
+                            print("ジョイスティック: 右スティック押下")
+
+                        # ボタン
+                        if controller_data.get("BUTTON_A"):
+                            print("ジョイスティック: ボタンA押下")
+                        if controller_data.get("BUTTON_B"):
+                            print("ジョイスティック: ボタンB押下")
+                        if controller_data.get("BUTTON_X"):
+                            print("ジョイスティック: ボタンX押下")
+                        if controller_data.get("BUTTON_Y"):
+                            print("ジョイスティック: ボタンY押下")
+                        if controller_data.get("BUTTON_LB"):
+                            print("ジョイスティック: ボタンLB押下")
+                        if controller_data.get("BUTTON_RB"):
+                            print("ジョイスティック: ボタンRB押下")
+                        if controller_data.get("BUTTON_BACK"):
+                            print("ジョイスティック: ボタンBACK押下")
+                        if controller_data.get("BUTTON_START"):
+                            print("ジョイスティック: ボタンSTART押下")
+
+                        # トリガー
+                        lt_val = controller_data.get("TRIGGER_LT", 0.0)
+                        rt_val = controller_data.get("TRIGGER_RT", 0.0)
+                        if lt_val > 0.5:
+                            print(f"ジョイスティック: LT (値: {lt_val:.2f})")
+                        if rt_val > 0.5:
+                            print(f"ジョイスティック: RT (値: {rt_val:.2f})")
+
+                        # ハット (十字キー)
+                        hat_x = controller_data.get("HAT_X", 0)
+                        hat_y = controller_data.get("HAT_Y", 0)
+                        if hat_y == 1:
+                            print("ジョイスティック: 十字キー上")
+                        elif hat_y == -1:
+                            print("ジョイスティック: 十字キー下")
+                        if hat_x == -1:
+                            print("ジョイスティック: 十字キー左")
+                        elif hat_x == 1:
+                            print("ジョイスティック: 十字キー右")
+                        
+                        # --- キーボード入力の処理 ---
+                        if keyboard_data.get("W"):
+                            print("キーボード: W (前進)")
+                        if keyboard_data.get("S"):
+                            print("キーボード: S (後退)")
+                        if keyboard_data.get("A"):
+                            print("キーボード: A (左)")
+                        if keyboard_data.get("D"):
+                            print("キーボード: D (右)")
 
                 except Exception as e:
                     print(e)
