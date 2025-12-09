@@ -1,4 +1,4 @@
-#rasp1_9_motor_servo_integrated_pigpio_only
+#rasp1_9_motor_servo_integrated_pigpio_only_v2
 import cv2
 import socket
 import threading
@@ -12,14 +12,20 @@ VIDEO_PORT = 5005
 MY_IP = "0.0.0.0"
 CONTROL_PORT = 5006
 
-# --- モーター制御設定 ---
-# 左足(履帯) - ハードウェアPWM0
-PIN_PWM_LEFT = 12   # 左モーターPWM (GPIO12 = PWM0)
-PIN_DIR_LEFT = 20   # 左モーター方向
+# --- 足回り（履帯）設定 ---
+PIN_PWM_LEFT = 12   # 左足 PWM
+PIN_DIR_LEFT = 20   # 左足 DIR
+PIN_PWM_RIGHT = 13  # 右足 PWM
+PIN_DIR_RIGHT = 21  # 右足 DIR
 
-# 右足(履帯) - ハードウェアPWM1
-PIN_PWM_RIGHT = 13  # 右モーターPWM (GPIO13 = PWM1)
-PIN_DIR_RIGHT = 21  # 右モーター方向
+# --- ウィンチ設定 (新規追加) ---
+# 右ウィンチ (RB/RT制御)
+PIN_PWM_WINCH_R = 18  # 指定: PWM 18
+PIN_DIR_WINCH_R = 23  # 任意: GPIO 23
+
+# 左ウィンチ (LB/LT制御)
+PIN_PWM_WINCH_L = 16  # 指定: PWM 16
+PIN_DIR_WINCH_L = 24  # 任意: GPIO 24
 
 PWM_FREQ = 20000    # PWM周波数 20kHz
 DEADZONE = 0.15     # スティックのデッドゾーン
@@ -47,10 +53,6 @@ class PCA9685:
         self.write_reg(self.PRESCALE, prescale)
         mode_wake = 0x80 | 0x20 | 0x01
         self.write_reg(self.MODE1, mode_wake)
-        time.sleep(0.005)
-        old_mode = self.pi.i2c_read_byte_data(self.handle, self.MODE1)
-        new_mode = (old_mode & 0x7F) | 0x10 
-        self.write_reg(self.MODE1, new_mode)
         self.write_reg(self.PRESCALE, prescale)
         self.write_reg(self.MODE1, old_mode)
         time.sleep(0.005)
@@ -121,7 +123,7 @@ class MotorController:
           0: 停止
         """
         # デッドゾーン処理
-        if abs(speed) < DEADZONE:
+        if abs(speed) < 0.05: # ウィンチ用に少し緩めの閾値
             speed = 0.0
         
         # 方向判定
@@ -135,7 +137,10 @@ class MotorController:
             direction = self.current_dir
             duty = 0
         
-        # 方向が変わる場合は一旦停止
+        # リミッター (念のため)
+        if duty > 1000: duty = 1000
+        
+        # 方向が変わる場合は一旦停止（モーター保護）
         if direction != self.current_dir and self.current_speed != 0:
             self.pi.set_PWM_dutycycle(self.pwm_pin, 0)
             time.sleep(0.05)
@@ -180,35 +185,38 @@ def receive_control(pi):
     # 1. サーボ初期化
     try:
         pca = PCA9685(pi)
-        
         servo0 = Servo(pca, channel=0, min_angle=60, max_angle=120)
         servo1 = Servo(pca, channel=1, min_angle=0, max_angle=180)
         servo2 = Servo(pca, channel=2, min_angle=60, max_angle=130)
-        servo3 = Servo(pca, channel=3, min_angle=0, max_angle=180)
-
+        servo3 = Servo(pca, channel=3, min_angle=0, max_angle=180) # 未使用
+        
         servo0.set_angle(90)
         servo1.set_angle(90)
         servo2.set_angle(90)
-        servo3.set_angle(90)
         
         current_deg_0 = 90
         current_deg_1 = 90
         current_deg_2 = 90
-        
-        print("[*] PCA9685初期化完了: サーボ0,1,2,3 準備OK")
-        
+        print("[*] PCA9685初期化完了")
     except Exception as e:
         print(f"[!] PCA9685初期化エラー: {e}")
         pca = None
     
-    # 2. モーター初期化 (pigpio使用、GPIO不要)
+    # 2. モーター初期化 (足回り + ウィンチ)
     try:
-        motor_left = MotorController(pi, PIN_PWM_LEFT, PIN_DIR_LEFT, "左モーター")
-        motor_right = MotorController(pi, PIN_PWM_RIGHT, PIN_DIR_RIGHT, "右モーター")
-        print("[*] モーター初期化完了")
+        # 足回り
+        motor_left = MotorController(pi, PIN_PWM_LEFT, PIN_DIR_LEFT, "左足")
+        motor_right = MotorController(pi, PIN_PWM_RIGHT, PIN_DIR_RIGHT, "右足")
+        
+        # ウィンチ
+        winch_left = MotorController(pi, PIN_PWM_WINCH_L, PIN_DIR_WINCH_L, "左ウィンチ(LB/LT)")
+        winch_right = MotorController(pi, PIN_PWM_WINCH_R, PIN_DIR_WINCH_R, "右ウィンチ(RB/RT)")
+        
+        print("[*] モーター＆ウィンチ初期化完了")
     except Exception as e:
         print(f"[!] モーター初期化エラー: {e}")
         return
+
     # 3. 通信待機
     tcp_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     tcp_server.bind((MY_IP, CONTROL_PORT))
@@ -235,112 +243,110 @@ def receive_control(pi):
                         current_data = json.loads(received_json_str)
                     except json.JSONDecodeError: continue
                     
-                    # データ更新時のみ処理
                     if current_data != last_received_data:
                         last_received_data = current_data
                         
                         ctl = current_data.get("controller", {})
-                        kbd = current_data.get("keyboard", {})
-
-                        # =================================================
-                        # ★ モーター制御 (戦車型制御)
-                        # =================================================
                         
-                        # 左スティック Y軸 → 左モーター (前後)
-                        # スティックの Y軸は上が負、下が正なので反転
+                        # =================================================
+                        # ★ 足回り制御 (戦車)
+                        # =================================================
                         ls_y = -ctl.get("LS_Y", 0.0)
                         motor_left.set_speed(ls_y)
                         
-                        # 右スティック Y軸 → 右モーター (前後)
                         rs_y = -ctl.get("RS_Y", 0.0)
                         motor_right.set_speed(rs_y)
                         
-                        # デバッグ出力
-                        if abs(ls_y) > DEADZONE or abs(rs_y) > DEADZONE:
-                            print(f"MOTOR: L={ls_y:+.2f}, R={rs_y:+.2f}")
-
                         # =================================================
-                        # ★ サーボ制御 (十字キー+ボタン)
+                        # ★ ウィンチ制御 (New!)
                         # =================================================
                         
+                        # トリガーの値は -1.0(解放) ～ 1.0(最大) で来る想定
+                        # 0.0 ～ 1.0 に正規化する
+                        raw_lt = ctl.get("TRIGGER_LT", -1.0)
+                        raw_rt = ctl.get("TRIGGER_RT", -1.0)
+                        
+                        lt_val = (raw_lt + 1.0) / 2.0  # 0.0 ~ 1.0
+                        rt_val = (raw_rt + 1.0) / 2.0  # 0.0 ~ 1.0
+                        
+                        # ボタンは True/False
+                        lb_pressed = ctl.get("BUTTON_LB", False)
+                        rb_pressed = ctl.get("BUTTON_RB", False)
+                        
+                        # --- 左ウィンチ (LB:正転 / LT:逆転) ---
+                        speed_wl = 0.0
+                        if lb_pressed:
+                            speed_wl += 1.0  # ボタンは最大出力
+                        if lt_val > 0.05:    # トリガーはデッドゾーン考慮
+                            speed_wl -= lt_val # 逆方向へアナログ出力
+                            
+                        winch_left.set_speed(speed_wl)
+                        
+                        # --- 右ウィンチ (RB:正転 / RT:逆転) ---
+                        speed_wr = 0.0
+                        if rb_pressed:
+                            speed_wr += 1.0
+                        if rt_val > 0.05:
+                            speed_wr -= rt_val
+                        
+                        winch_right.set_speed(speed_wr)
+
+                        # デバッグ表示 (値があるときだけ)
+                        if abs(speed_wl) > 0.1 or abs(speed_wr) > 0.1:
+                             print(f"WINCH: L={speed_wl:.2f}, R={speed_wr:.2f}")
+
+                        # =================================================
+                        # ★ サーボ制御
+                        # =================================================
                         if pca:
-                            # サーボ0: 十字キー上下
+                            # Servo0: HAT_Y
                             hat_y = ctl.get("HAT_Y", 0)
                             if hat_y != 0:
-                                step = 5
-                                if hat_y == 1: current_deg_0 += step
-                                elif hat_y == -1: current_deg_0 -= step
-                                
+                                if hat_y == 1: current_deg_0 += 5
+                                elif hat_y == -1: current_deg_0 -= 5
                                 current_deg_0 = max(60, min(120, current_deg_0))
                                 servo0.set_angle(current_deg_0)
-                                print(f"SERVO0: {current_deg_0}°")
 
-                            # サーボ1: 十字キー左右 (逆方向)
+                            # Servo1: HAT_X
                             hat_x = ctl.get("HAT_X", 0)
                             if hat_x != 0:
-                                step = 10
-                                if hat_x == 1: current_deg_1 -= step  # 右入力で減少
-                                elif hat_x == -1: current_deg_1 += step  # 左入力で増加
-                                
+                                if hat_x == 1: current_deg_1 -= 10
+                                elif hat_x == -1: current_deg_1 += 10
                                 current_deg_1 = max(0, min(180, current_deg_1))
                                 servo1.set_angle(current_deg_1)
-                                print(f"SERVO1: {current_deg_1}°")
 
-                            # サーボ2: ボタンY(上下), ボタンX(左右)
-                            button_y = ctl.get("BUTTON_Y", False)
-                            button_x = ctl.get("BUTTON_X", False)
-                            button_a = ctl.get("BUTTON_A", False)
-                            button_b = ctl.get("BUTTON_B", False)
-                            
-                            if button_y or button_a or button_x or button_b:
-                                step = 5
-                                if button_y:  # Y押下 = 増加
-                                    current_deg_2 += step
-                                elif button_a:  # A押下 = 減少
-                                    current_deg_2 -= step
-                                
-                                # X/Bでも制御可能にする場合
-                                if button_x:  # X押下 = 減少
-                                    current_deg_2 -= step
-                                elif button_b:  # B押下 = 増加
-                                    current_deg_2 += step
-                                
-                                current_deg_2 = max(60, min(130, current_deg_2))
+                            # Servo2: Buttons
+                            if ctl.get("BUTTON_Y") or ctl.get("BUTTON_B"): current_deg_2 += 5
+                            if ctl.get("BUTTON_A") or ctl.get("BUTTON_X"): current_deg_2 -= 5
+                            current_deg_2 = max(60, min(130, current_deg_2))
+                            if servo2.current_angle != current_deg_2:
                                 servo2.set_angle(current_deg_2)
-                                print(f"SERVO2: {current_deg_2}°")
 
                         # =================================================
-                        # ★ その他の入力ログ
+                        # ★ 緊急停止 (スティック押し込み)
                         # =================================================
-                        
-                        if ctl.get("LS_PRESS"): 
-                            print("LOG: 左スティック押し込み - 緊急停止")
+                        if ctl.get("LS_PRESS") or ctl.get("RS_PRESS"): 
+                            print("LOG: 緊急停止")
                             motor_left.stop()
                             motor_right.stop()
-                        if ctl.get("RS_PRESS"): 
-                            print("LOG: 右スティック押し込み - 緊急停止")
-                            motor_left.stop()
-                            motor_right.stop()
-
-                        lt = ctl.get("TRIGGER_LT", 0.0)
-                        if lt > 0.5: print(f"LOG: LT {lt:.2f}")
-                        
-                        if kbd.get("W"): print("LOG: Key W")
-                        if kbd.get("S"): print("LOG: Key S")
+                            winch_left.stop()
+                            winch_right.stop()
 
                 except Exception as e:
                     print(f"エラー: {e}")
                     break
         
-        # 接続切断時は全モーター停止
-        print("[!] 切断されました - モーター停止")
+        # 切断時停止
+        print("[!] 切断 - 全モーター停止")
         motor_left.stop()
         motor_right.stop()
+        winch_left.stop()
+        winch_right.stop()
 
 if __name__ == "__main__":
     pi = pigpio.pi()
     if not pi.connected:
-        print("[!] pigpioデーモンに接続できません。'sudo pigpiod' を確認してください。")
+        print("[!] pigpioデーモンに接続できません。")
         exit()
 
     try:
@@ -351,8 +357,8 @@ if __name__ == "__main__":
         receive_control(pi)
         
     except KeyboardInterrupt:
-        print("\n[*] キーボード割り込み検出")
+        print("\n[*] キーボード割り込み")
     finally:
-        print("[*] 終了処理中...")
+        print("[*] 終了処理...")
         pi.stop()
-        print("[*] 終了完了")
+        print("[*] 完了")
