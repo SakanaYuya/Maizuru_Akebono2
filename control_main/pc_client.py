@@ -19,6 +19,10 @@ VIDEO_PORT = 5005
 RPI_IP = "192.168.50.20"
 CONTROL_PORT = 5006
 
+# --- 映像表示設定 ---
+# 映像回転角度: 0, 90, 180, 270 のいずれかを指定
+VIDEO_ROTATION = 270  # ★ここで回転角度を変更できます
+
 # --- control.py / control_GUI.py からマッピング情報をコピー ---
 AXIS_MAPPING = {
     0: {"name": "左スティック X"}, 1: {"name": "左スティック Y"},
@@ -44,6 +48,7 @@ def receive_video():
     udp_sock.settimeout(1.0)  # タイムアウト設定で終了検知
     udp_sock.bind((MY_IP, VIDEO_PORT))
     print(f"[*] 映像待機中: UDP {VIDEO_PORT}")
+    print(f"[*] 映像回転角度: {VIDEO_ROTATION}度")
 
     while is_running:
         try:
@@ -52,6 +57,15 @@ def receive_video():
             frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             
             if frame is not None:
+                # 映像回転処理
+                if VIDEO_ROTATION == 90:
+                    frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+                elif VIDEO_ROTATION == 180:
+                    frame = cv2.rotate(frame, cv2.ROTATE_180)
+                elif VIDEO_ROTATION == 270:
+                    frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+                # VIDEO_ROTATION == 0 の場合は回転なし
+                
                 cv2.imshow("Raspberry Pi Camera (Low Latency)", frame)
                 
             if cv2.waitKey(1) & 0xFF == ord('q'):

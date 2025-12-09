@@ -1,11 +1,10 @@
-#rasp1_9_motor_servo_integrated
+#rasp1_9_motor_servo_integrated_pigpio_only
 import cv2
 import socket
 import threading
 import time
 import json
 import pigpio
-import RPi.GPIO as GPIO
 
 # --- 通信設定 ---
 PC_IP = "192.168.50.10"
@@ -89,20 +88,26 @@ class Servo:
         self.pca.set_pwm(self.channel, 0, count)
         self.current_angle = angle
 
-# --- モーター制御クラス ---
+# --- モーター制御クラス (pigpio版) ---
 class MotorController:
-    """DC モーター制御 (PWM + DIR)"""
-    def __init__(self, pwm_pin, dir_pin, name="Motor"):
+    """DC モーター制御 (PWM + DIR) - pigpio使用"""
+    def __init__(self, pi, pwm_pin, dir_pin, name="Motor"):
+        self.pi = pi
         self.pwm_pin = pwm_pin
         self.dir_pin = dir_pin
         self.name = name
         
-        GPIO.setup(self.pwm_pin, GPIO.OUT)
-        GPIO.setup(self.dir_pin, GPIO.OUT)
+        # ピンをOUTPUTに設定
+        self.pi.set_mode(self.pwm_pin, pigpio.OUTPUT)
+        self.pi.set_mode(self.dir_pin, pigpio.OUTPUT)
         
-        self.pwm = GPIO.PWM(self.pwm_pin, PWM_FREQ)
-        self.pwm.start(0)
-        GPIO.output(self.dir_pin, GPIO.LOW)
+        # PWM周波数を設定 (20kHz)
+        self.pi.set_PWM_frequency(self.pwm_pin, PWM_FREQ)
+        self.pi.set_PWM_range(self.pwm_pin, 1000)  # 0-1000のデューティサイクル
+        
+        # 初期状態
+        self.pi.set_PWM_dutycycle(self.pwm_pin, 0)
+        self.pi.write(self.dir_pin, 0)
         
         self.current_speed = 0.0
         self.current_dir = 0
@@ -121,36 +126,36 @@ class MotorController:
         
         # 方向判定
         if speed > 0:
-            direction = GPIO.HIGH
-            duty = abs(speed) * 100.0
+            direction = 1
+            duty = int(abs(speed) * 1000)  # 0-1000
         elif speed < 0:
-            direction = GPIO.LOW
-            duty = abs(speed) * 100.0
+            direction = 0
+            duty = int(abs(speed) * 1000)
         else:
-            direction = self.current_dir  # 停止時は方向維持
-            duty = 0.0
+            direction = self.current_dir
+            duty = 0
         
         # 方向が変わる場合は一旦停止
         if direction != self.current_dir and self.current_speed != 0:
-            self.pwm.ChangeDutyCycle(0)
-            time.sleep(0.05)  # 慣性を考慮した短い停止
+            self.pi.set_PWM_dutycycle(self.pwm_pin, 0)
+            time.sleep(0.05)
         
         # 方向設定
-        GPIO.output(self.dir_pin, direction)
+        self.pi.write(self.dir_pin, direction)
         self.current_dir = direction
         
         # PWM出力
-        self.pwm.ChangeDutyCycle(duty)
+        self.pi.set_PWM_dutycycle(self.pwm_pin, duty)
         self.current_speed = speed
         
     def stop(self):
         """完全停止"""
-        self.pwm.ChangeDutyCycle(0)
+        self.pi.set_PWM_dutycycle(self.pwm_pin, 0)
         self.current_speed = 0.0
         
     def cleanup(self):
         """終了処理"""
-        self.pwm.stop()
+        self.pi.set_PWM_dutycycle(self.pwm_pin, 0)
 
 # --- 映像送信処理 ---
 def send_video():
@@ -172,20 +177,7 @@ def send_video():
 
 # --- 操作受信 & 制御処理 ---
 def receive_control(pi):
-    # 1. GPIO初期化
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setwarnings(False)
-    
-    # 2. モーター初期化
-    try:
-        motor_left = MotorController(PIN_PWM_LEFT, PIN_DIR_LEFT, "左モーター")
-        motor_right = MotorController(PIN_PWM_RIGHT, PIN_DIR_RIGHT, "右モーター")
-        print("[*] モーター初期化完了")
-    except Exception as e:
-        print(f"[!] モーター初期化エラー: {e}")
-        return
-    
-    # 3. サーボ初期化
+    # 1. サーボ初期化
     try:
         pca = PCA9685(pi)
         
@@ -201,14 +193,23 @@ def receive_control(pi):
         
         current_deg_0 = 90
         current_deg_1 = 90
+        current_deg_2 = 90
         
         print("[*] PCA9685初期化完了: サーボ0,1,2,3 準備OK")
         
     except Exception as e:
         print(f"[!] PCA9685初期化エラー: {e}")
         pca = None
-
-    # 4. 通信待機
+    
+    # 2. モーター初期化 (pigpio使用、GPIO不要)
+    try:
+        motor_left = MotorController(pi, PIN_PWM_LEFT, PIN_DIR_LEFT, "左モーター")
+        motor_right = MotorController(pi, PIN_PWM_RIGHT, PIN_DIR_RIGHT, "右モーター")
+        print("[*] モーター初期化完了")
+    except Exception as e:
+        print(f"[!] モーター初期化エラー: {e}")
+        return
+    # 3. 通信待機
     tcp_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     tcp_server.bind((MY_IP, CONTROL_PORT))
     tcp_server.listen(1)
@@ -259,7 +260,7 @@ def receive_control(pi):
                             print(f"MOTOR: L={ls_y:+.2f}, R={rs_y:+.2f}")
 
                         # =================================================
-                        # ★ サーボ制御 (十字キー)
+                        # ★ サーボ制御 (十字キー+ボタン)
                         # =================================================
                         
                         if pca:
@@ -274,23 +275,44 @@ def receive_control(pi):
                                 servo0.set_angle(current_deg_0)
                                 print(f"SERVO0: {current_deg_0}°")
 
-                            # サーボ1: 十字キー左右
+                            # サーボ1: 十字キー左右 (逆方向)
                             hat_x = ctl.get("HAT_X", 0)
                             if hat_x != 0:
                                 step = 10
-                                if hat_x == 1: current_deg_1 += step
-                                elif hat_x == -1: current_deg_1 -= step
+                                if hat_x == 1: current_deg_1 -= step  # 右入力で減少
+                                elif hat_x == -1: current_deg_1 += step  # 左入力で増加
                                 
                                 current_deg_1 = max(0, min(180, current_deg_1))
                                 servo1.set_angle(current_deg_1)
                                 print(f"SERVO1: {current_deg_1}°")
 
+                            # サーボ2: ボタンY(上下), ボタンX(左右)
+                            button_y = ctl.get("BUTTON_Y", False)
+                            button_x = ctl.get("BUTTON_X", False)
+                            button_a = ctl.get("BUTTON_A", False)
+                            button_b = ctl.get("BUTTON_B", False)
+                            
+                            if button_y or button_a or button_x or button_b:
+                                step = 5
+                                if button_y:  # Y押下 = 増加
+                                    current_deg_2 += step
+                                elif button_a:  # A押下 = 減少
+                                    current_deg_2 -= step
+                                
+                                # X/Bでも制御可能にする場合
+                                if button_x:  # X押下 = 減少
+                                    current_deg_2 -= step
+                                elif button_b:  # B押下 = 増加
+                                    current_deg_2 += step
+                                
+                                current_deg_2 = max(60, min(130, current_deg_2))
+                                servo2.set_angle(current_deg_2)
+                                print(f"SERVO2: {current_deg_2}°")
+
                         # =================================================
                         # ★ その他の入力ログ
                         # =================================================
                         
-                        if ctl.get("BUTTON_A"): print("LOG: ボタンA")
-                        if ctl.get("BUTTON_B"): print("LOG: ボタンB")
                         if ctl.get("LS_PRESS"): 
                             print("LOG: 左スティック押し込み - 緊急停止")
                             motor_left.stop()
@@ -332,6 +354,5 @@ if __name__ == "__main__":
         print("\n[*] キーボード割り込み検出")
     finally:
         print("[*] 終了処理中...")
-        GPIO.cleanup()
         pi.stop()
         print("[*] 終了完了")
