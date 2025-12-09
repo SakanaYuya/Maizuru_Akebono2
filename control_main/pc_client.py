@@ -1,4 +1,4 @@
-#V5
+#V6 - Safe Stop Edition
 import cv2
 import socket
 import numpy as np
@@ -34,13 +34,18 @@ HAT_MAPPING = {
 }
 # --- ここまで ---
 
+# グローバル終了フラグ
+is_running = True
+
 # --- UDP受信 (映像) ---
 def receive_video():
+    global is_running
     udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp_sock.settimeout(1.0)  # タイムアウト設定で終了検知
     udp_sock.bind((MY_IP, VIDEO_PORT))
     print(f"[*] 映像待機中: UDP {VIDEO_PORT}")
 
-    while True:
+    while is_running:
         try:
             data, addr = udp_sock.recvfrom(65535)
             nparr = np.frombuffer(data, np.uint8)
@@ -50,24 +55,31 @@ def receive_video():
                 cv2.imshow("Raspberry Pi Camera (Low Latency)", frame)
                 
             if cv2.waitKey(1) & 0xFF == ord('q'):
+                is_running = False
                 break
+        except socket.timeout:
+            continue
         except Exception as e:
-            print(f"Video Error: {e}")
+            if is_running:  # 終了処理中でなければエラー表示
+                print(f"Video Error: {e}")
 
     udp_sock.close()
     cv2.destroyAllWindows()
+    print("[*] 映像受信スレッド終了")
 
 class ControllerClientGUI:
     def __init__(self, root):
+        global is_running
         self.root = root
         self.root.title("コントローラーUI & Raspberry Pi クライアント")
-        self.root.geometry("600x400")
+        self.root.geometry("600x450")  # 高さを少し増やす
         self.root.configure(bg='gray10')
         self.joystick = None
         self.indicators = {}
         self.stick_coords = {}
         self.trigger_coords = {}
-        self.last_sent_data = json.dumps({}) # 最後の送信データを記憶 (JSON形式)
+        self.last_sent_data = json.dumps({})
+        self.is_running = True
 
         # --- Pygameの初期化 ---
         pygame.init()
@@ -83,13 +95,13 @@ class ControllerClientGUI:
         except Exception as e:
             print(f"[!] ラズパイへの接続に失敗しました: {e}")
             print("[!] ラズパイ側を先に起動してください。")
-            self.tcp_sock = None # 接続失敗時はNoneにする
+            self.tcp_sock = None
 
         # --- GUIコンポーネントの作成 ---
         self.create_widgets()
 
         # --- メインループ処理 ---
-        self.update_gui() # Tkinterのイベントループから呼び出される
+        self.update_gui()
 
     def init_joystick(self):
         if pygame.joystick.get_count() > 0:
@@ -101,6 +113,33 @@ class ControllerClientGUI:
             print("コントローラーが見つかりません。キーボード(WASD)での操作も可能です。")
 
     def create_widgets(self):
+        # ステータス表示エリア
+        self.status_frame = tk.Frame(self.root, bg='gray10')
+        self.status_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=5)
+        
+        self.status_label = tk.Label(
+            self.status_frame, 
+            text="接続中" if self.tcp_sock else "未接続", 
+            fg="lime" if self.tcp_sock else "red",
+            bg='gray10',
+            font=("Consolas", 10, "bold")
+        )
+        self.status_label.pack(side=tk.LEFT)
+        
+        # 停止ボタン
+        self.stop_button = tk.Button(
+            self.status_frame,
+            text="安全停止 (Q)",
+            command=self.safe_shutdown,
+            bg='red',
+            fg='white',
+            font=("Consolas", 10, "bold"),
+            padx=10,
+            pady=5
+        )
+        self.stop_button.pack(side=tk.RIGHT)
+        
+        # メインキャンバス
         self.canvas = tk.Canvas(self.root, bg='gray10', highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
@@ -110,6 +149,15 @@ class ControllerClientGUI:
         self.draw_trigger_area("RT", "RT", 480,100)
         self.draw_dpad_area("DPAD", "十字キー", 160, 290)
         self.draw_button_area("BUTTONS", "ボタン", 440, 290)
+        
+        # ヘルプテキスト
+        help_text = "Qキーまたは停止ボタンで安全終了"
+        self.canvas.create_text(
+            300, 380, 
+            text=help_text, 
+            fill="yellow", 
+            font=("Consolas", 9)
+        )
 
     def draw_stick_area(self, name, label, cx, cy):
         radius = 50 
@@ -197,7 +245,7 @@ class ControllerClientGUI:
         if name not in self.trigger_coords: return
         
         coords = self.trigger_coords[name]
-        norm_value = (value + 1) / 2 # -1~1 -> 0~1
+        norm_value = (value + 1) / 2
         
         bg_x1 = coords["x"]
         bg_y1 = coords["y"]
@@ -208,13 +256,53 @@ class ControllerClientGUI:
         new_y1 = bg_y2 - (height * norm_value)
         self.canvas.coords(self.indicators[name], bg_x1, new_y1, bg_x2, bg_y2)
 
+    def safe_shutdown(self):
+        """安全な終了処理"""
+        global is_running
+        print("[*] 安全停止処理を開始...")
+        
+        self.is_running = False
+        is_running = False
+        
+        # ステータス更新
+        self.status_label.config(text="停止中...", fg="orange")
+        
+        # 全入力をゼロにして送信
+        stop_data = {
+            "controller": {
+                "LS_X": 0.0, "LS_Y": 0.0,
+                "RS_X": 0.0, "RS_Y": 0.0,
+                "LS_PRESS": False, "RS_PRESS": False,
+                "TRIGGER_LT": 0.0, "TRIGGER_RT": 0.0,
+                "HAT_X": 0, "HAT_Y": 0
+            },
+            "keyboard": {
+                "W": False, "A": False, "S": False, "D": False
+            }
+        }
+        
+        if self.tcp_sock:
+            try:
+                json_stop = json.dumps(stop_data)
+                self.tcp_sock.sendall((json_stop + "\n").encode('utf-8'))
+                print("[*] 停止信号を送信しました")
+                time.sleep(0.1)
+            except Exception as e:
+                print(f"[!] 停止信号送信エラー: {e}")
+        
+        # ウィンドウを閉じる
+        self.root.quit()
+
     def update_gui(self):
-        controller_data = {} # コントローラーからの入力データを格納
-        keyboard_data = {}   # キーボードからの入力データを格納
+        if not self.is_running:
+            return
+            
+        controller_data = {}
+        keyboard_data = {}
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                self.root.quit()
+                self.safe_shutdown()
                 return
             
             if event.type == pygame.JOYDEVICEADDED:
@@ -227,11 +315,17 @@ class ControllerClientGUI:
                     print("コントローラー切断されました。")
                     self.joystick = None
 
+        # キーボードでの終了チェック (Qキー)
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_q]:
+            self.safe_shutdown()
+            return
+
         # コントローラーが接続されていなければ再試行
         if not self.joystick:
             if pygame.joystick.get_count() > 0:
                 self.init_joystick()
-            self.root.after(16, self.update_gui) # GUI更新頻度に合わせて調整
+            self.root.after(16, self.update_gui)
             return
 
         # --- 状態のポーリングとGUI更新 & コマンドの決定ロジック ---
@@ -283,7 +377,6 @@ class ControllerClientGUI:
             controller_data["HAT_Y"] = hat_y
         
         # キーボード入力
-        keys = pygame.key.get_pressed()
         keyboard_data["W"] = bool(keys[pygame.K_w])
         keyboard_data["A"] = bool(keys[pygame.K_a])
         keyboard_data["S"] = bool(keys[pygame.K_s])
@@ -299,7 +392,6 @@ class ControllerClientGUI:
         # 前回の送信データと異なる場合のみ送信
         if self.tcp_sock and json_to_send != self.last_sent_data:
             try:
-                # print(f"送信データ: {json_to_send}") # デバッグ用
                 self.tcp_sock.sendall((json_to_send + "\n").encode('utf-8'))
                 self.last_sent_data = json_to_send
             except Exception as e:
@@ -307,14 +399,13 @@ class ControllerClientGUI:
                 if self.tcp_sock:
                     self.tcp_sock.close()
                 self.tcp_sock = None
+                self.status_label.config(text="切断", fg="red")
         
-        self.root.after(16, self.update_gui) # 約60FPS
+        self.root.after(16, self.update_gui)
 
     def on_closing(self):
-        if self.tcp_sock:
-            self.tcp_sock.close()
-        pygame.quit()
-        self.root.destroy()
+        """ウィンドウ×ボタン押下時"""
+        self.safe_shutdown()
 
 if __name__ == "__main__":
     # 映像受信は別スレッドで動かす
@@ -325,6 +416,14 @@ if __name__ == "__main__":
     # メインスレッドでGUIと操作送信を行う
     root = tk.Tk()
     app = ControllerClientGUI(root)
-    root.protocol("WM_DELETE_WINDOW", app.on_closing) # ウィンドウ閉じるときの処理
-    root.mainloop()
-    pygame.quit()
+    root.protocol("WM_DELETE_WINDOW", app.on_closing)
+    
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        print("\n[*] キーボード割り込み検出")
+    finally:
+        print("[*] クリーンアップ中...")
+        is_running = False
+        pygame.quit()
+        print("[*] 終了完了")
