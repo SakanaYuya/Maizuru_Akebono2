@@ -1,11 +1,11 @@
-#rasp1_8_pca9685_full
+#rasp1_9_motor_servo_integrated
 import cv2
 import socket
 import threading
 import time
 import json
 import pigpio
-import math
+import RPi.GPIO as GPIO
 
 # --- 通信設定 ---
 PC_IP = "192.168.50.10"
@@ -13,7 +13,19 @@ VIDEO_PORT = 5005
 MY_IP = "0.0.0.0"
 CONTROL_PORT = 5006
 
-# --- サーボ制御クラス定義 (変更なし) ---
+# --- モーター制御設定 ---
+# 左足(履帯) - ハードウェアPWM0
+PIN_PWM_LEFT = 12   # 左モーターPWM (GPIO12 = PWM0)
+PIN_DIR_LEFT = 20   # 左モーター方向
+
+# 右足(履帯) - ハードウェアPWM1
+PIN_PWM_RIGHT = 13  # 右モーターPWM (GPIO13 = PWM1)
+PIN_DIR_RIGHT = 21  # 右モーター方向
+
+PWM_FREQ = 20000    # PWM周波数 20kHz
+DEADZONE = 0.15     # スティックのデッドゾーン
+
+# --- サーボ制御クラス定義 ---
 class PCA9685:
     """pigpioを使用したPCA9685制御クラス"""
     MODE1 = 0x00
@@ -77,7 +89,70 @@ class Servo:
         self.pca.set_pwm(self.channel, 0, count)
         self.current_angle = angle
 
-# --- 映像送信処理 (変更なし) ---
+# --- モーター制御クラス ---
+class MotorController:
+    """DC モーター制御 (PWM + DIR)"""
+    def __init__(self, pwm_pin, dir_pin, name="Motor"):
+        self.pwm_pin = pwm_pin
+        self.dir_pin = dir_pin
+        self.name = name
+        
+        GPIO.setup(self.pwm_pin, GPIO.OUT)
+        GPIO.setup(self.dir_pin, GPIO.OUT)
+        
+        self.pwm = GPIO.PWM(self.pwm_pin, PWM_FREQ)
+        self.pwm.start(0)
+        GPIO.output(self.dir_pin, GPIO.LOW)
+        
+        self.current_speed = 0.0
+        self.current_dir = 0
+        
+    def set_speed(self, speed):
+        """
+        速度設定
+        speed: -1.0 ~ 1.0
+          正: 前進 (DIR=HIGH)
+          負: 後退 (DIR=LOW)
+          0: 停止
+        """
+        # デッドゾーン処理
+        if abs(speed) < DEADZONE:
+            speed = 0.0
+        
+        # 方向判定
+        if speed > 0:
+            direction = GPIO.HIGH
+            duty = abs(speed) * 100.0
+        elif speed < 0:
+            direction = GPIO.LOW
+            duty = abs(speed) * 100.0
+        else:
+            direction = self.current_dir  # 停止時は方向維持
+            duty = 0.0
+        
+        # 方向が変わる場合は一旦停止
+        if direction != self.current_dir and self.current_speed != 0:
+            self.pwm.ChangeDutyCycle(0)
+            time.sleep(0.05)  # 慣性を考慮した短い停止
+        
+        # 方向設定
+        GPIO.output(self.dir_pin, direction)
+        self.current_dir = direction
+        
+        # PWM出力
+        self.pwm.ChangeDutyCycle(duty)
+        self.current_speed = speed
+        
+    def stop(self):
+        """完全停止"""
+        self.pwm.ChangeDutyCycle(0)
+        self.current_speed = 0.0
+        
+    def cleanup(self):
+        """終了処理"""
+        self.pwm.stop()
+
+# --- 映像送信処理 ---
 def send_video():
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
@@ -95,32 +170,35 @@ def send_video():
             except Exception: pass 
         time.sleep(0.03)
 
-# --- 操作受信 & サーボ制御処理 (マージ版) ---
+# --- 操作受信 & 制御処理 ---
 def receive_control(pi):
-    # 1. サーボの初期化・宣言
+    # 1. GPIO初期化
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setwarnings(False)
+    
+    # 2. モーター初期化
+    try:
+        motor_left = MotorController(PIN_PWM_LEFT, PIN_DIR_LEFT, "左モーター")
+        motor_right = MotorController(PIN_PWM_RIGHT, PIN_DIR_RIGHT, "右モーター")
+        print("[*] モーター初期化完了")
+    except Exception as e:
+        print(f"[!] モーター初期化エラー: {e}")
+        return
+    
+    # 3. サーボ初期化
     try:
         pca = PCA9685(pi)
         
-        # --- サーボ定義エリア ---
-        # サーボ0: 基準90, 範囲60~120
         servo0 = Servo(pca, channel=0, min_angle=60, max_angle=120)
-        
-        # サーボ1: 基準90, 範囲0~180
         servo1 = Servo(pca, channel=1, min_angle=0, max_angle=180)
-        
-        # サーボ2: 基準90, 範囲60~130
         servo2 = Servo(pca, channel=2, min_angle=60, max_angle=130)
-        
-        # サーボ3: 指定なしのため汎用設定 (基準90, 範囲0~180)
         servo3 = Servo(pca, channel=3, min_angle=0, max_angle=180)
 
-        # 全て基準位置(90度)へ移動
         servo0.set_angle(90)
         servo1.set_angle(90)
         servo2.set_angle(90)
         servo3.set_angle(90)
         
-        # インチング動作(十字キー)用に現在の角度を変数で持つ
         current_deg_0 = 90
         current_deg_1 = 90
         
@@ -128,9 +206,9 @@ def receive_control(pi):
         
     except Exception as e:
         print(f"[!] PCA9685初期化エラー: {e}")
-        return
+        pca = None
 
-    # 2. 通信待機
+    # 4. 通信待機
     tcp_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     tcp_server.bind((MY_IP, CONTROL_PORT))
     tcp_server.listen(1)
@@ -163,67 +241,79 @@ def receive_control(pi):
                         ctl = current_data.get("controller", {})
                         kbd = current_data.get("keyboard", {})
 
-                        # -------------------------------------------------
-                        # ★ 1. サーボ制御エリア
-                        # -------------------------------------------------
+                        # =================================================
+                        # ★ モーター制御 (戦車型制御)
+                        # =================================================
                         
-                        # [サーボ0] 十字キー上下で操作 (インチング動作)
-                        hat_y = ctl.get("HAT_Y", 0)
-                        if hat_y != 0:
-                            step = 5
-                            if hat_y == 1: current_deg_0 += step   # 上
-                            elif hat_y == -1: current_deg_0 -= step # 下
-                            
-                            # 範囲制限はServoクラス内でも行われるが、変数の発散を防ぐためここでもClamp推奨
-                            if current_deg_0 > 120: current_deg_0 = 120
-                            if current_deg_0 < 60: current_deg_0 = 60
-                            
-                            servo0.set_angle(current_deg_0)
-                            print(f"ACT: サーボ0 -> {current_deg_0}度")
-
-                        # [サーボ1] 十字キー右左で操作
-                        hat_x = ctl.get("HAT_X", 0)
-                        if hat_x != 0:
-                            step = 10
-                            if hat_x == 1: current_deg_1 += step    # 右入力でプラス
-                            elif hat_x == -1: current_deg_1 -= step # 左入力でマイナス
-                            
-                            # 範囲制限 0~180
-                            if current_deg_1 > 180: current_deg_1 = 180
-                            if current_deg_1 < 0: current_deg_1 = 0
-                            
-                            servo1.set_angle(current_deg_1)
-                            print(f"ACT: サーボ1(左右) -> {current_deg_1}度")
-
-                        # -------------------------------------------------
-                           # ★ 2. その他の入力ログ (元の機能を継続)
-                        # -------------------------------------------------
+                        # 左スティック Y軸 → 左モーター (前後)
+                        # スティックの Y軸は上が負、下が正なので反転
+                        ls_y = -ctl.get("LS_Y", 0.0)
+                        motor_left.set_speed(ls_y)
                         
-                        # スティック
-                        ls_y = ctl.get("LS_Y", 0.0)
-                        if abs(ls_y) > 0.5: print(f"LOG: 左スティック Y={ls_y:.2f}")
+                        # 右スティック Y軸 → 右モーター (前後)
+                        rs_y = -ctl.get("RS_Y", 0.0)
+                        motor_right.set_speed(rs_y)
+                        
+                        # デバッグ出力
+                        if abs(ls_y) > DEADZONE or abs(rs_y) > DEADZONE:
+                            print(f"MOTOR: L={ls_y:+.2f}, R={rs_y:+.2f}")
 
-                        rs_y = ctl.get("RS_Y", 0.0)
-                        if abs(rs_y) > 0.5: print(f"LOG: 右スティック Y={rs_y:.2f}")
+                        # =================================================
+                        # ★ サーボ制御 (十字キー)
+                        # =================================================
+                        
+                        if pca:
+                            # サーボ0: 十字キー上下
+                            hat_y = ctl.get("HAT_Y", 0)
+                            if hat_y != 0:
+                                step = 5
+                                if hat_y == 1: current_deg_0 += step
+                                elif hat_y == -1: current_deg_0 -= step
+                                
+                                current_deg_0 = max(60, min(120, current_deg_0))
+                                servo0.set_angle(current_deg_0)
+                                print(f"SERVO0: {current_deg_0}°")
 
-                        # ボタン
+                            # サーボ1: 十字キー左右
+                            hat_x = ctl.get("HAT_X", 0)
+                            if hat_x != 0:
+                                step = 10
+                                if hat_x == 1: current_deg_1 += step
+                                elif hat_x == -1: current_deg_1 -= step
+                                
+                                current_deg_1 = max(0, min(180, current_deg_1))
+                                servo1.set_angle(current_deg_1)
+                                print(f"SERVO1: {current_deg_1}°")
+
+                        # =================================================
+                        # ★ その他の入力ログ
+                        # =================================================
+                        
                         if ctl.get("BUTTON_A"): print("LOG: ボタンA")
                         if ctl.get("BUTTON_B"): print("LOG: ボタンB")
-                        if ctl.get("LS_PRESS"): print("LOG: 左スティック押し込み")
-                        if ctl.get("RS_PRESS"): print("LOG: 右スティック押し込み")
+                        if ctl.get("LS_PRESS"): 
+                            print("LOG: 左スティック押し込み - 緊急停止")
+                            motor_left.stop()
+                            motor_right.stop()
+                        if ctl.get("RS_PRESS"): 
+                            print("LOG: 右スティック押し込み - 緊急停止")
+                            motor_left.stop()
+                            motor_right.stop()
 
-                        # トリガー
                         lt = ctl.get("TRIGGER_LT", 0.0)
-                        if lt > 0.5: print(f"LOG: LT入力 {lt:.2f}")
+                        if lt > 0.5: print(f"LOG: LT {lt:.2f}")
                         
-                        # キーボード
                         if kbd.get("W"): print("LOG: Key W")
                         if kbd.get("S"): print("LOG: Key S")
 
                 except Exception as e:
                     print(f"エラー: {e}")
                     break
-        print("[!] 切断されました")
+        
+        # 接続切断時は全モーター停止
+        print("[!] 切断されました - モーター停止")
+        motor_left.stop()
+        motor_right.stop()
 
 if __name__ == "__main__":
     pi = pigpio.pi()
@@ -239,7 +329,9 @@ if __name__ == "__main__":
         receive_control(pi)
         
     except KeyboardInterrupt:
-        pass
+        print("\n[*] キーボード割り込み検出")
     finally:
-        print("終了処理")
+        print("[*] 終了処理中...")
+        GPIO.cleanup()
         pi.stop()
+        print("[*] 終了完了")
