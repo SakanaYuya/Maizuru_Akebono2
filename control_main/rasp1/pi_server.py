@@ -1,5 +1,5 @@
-#rasp1_RAS_ver9.3
-# Deep Sleep対策・強力WakeUp実装版
+#rasp1_RAS_ver9.4
+# 解像度高度化版
 import cv2
 import socket
 import threading
