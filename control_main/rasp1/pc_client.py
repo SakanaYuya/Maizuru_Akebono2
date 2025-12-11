@@ -1,4 +1,4 @@
-#V6 - Safe Stop Edition
+#V7 コントローラーUI & Raspberry Pi クライアント 解像度対応版
 import cv2
 import socket
 import numpy as np

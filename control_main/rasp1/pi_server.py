@@ -1,5 +1,5 @@
-#rasp1_RAS_ver9.2
-#安定版
+#rasp1_RAS_ver9.3
+# Deep Sleep対策・強力WakeUp実装版
 import cv2
 import socket
 import threading
@@ -34,21 +34,51 @@ PWM_FREQ = 20000    # PWM周波数 20kHz
 DEADZONE = 0.15     # スティックのデッドゾーン
 TRIGGER_MIN_SPEED = 0.3  # トリガーの最小速度 (30%)
 
-# --- サーボ制御クラス定義 ---
+# --- サーボ制御クラス定義 (Wake-Up機能統合版) ---
 class PCA9685:
-    """pigpioを使用したPCA9685制御クラス"""
+    """pigpioを使用したPCA9685制御クラス (Deep Sleep解除機能付き)"""
     MODE1 = 0x00
     PRESCALE = 0xFE
     LED0_ON_L = 0x06
+    LED0_ON_H = 0x07
+    LED0_OFF_L = 0x08
+    LED0_OFF_H = 0x09
 
     def __init__(self, pi, address=0x40, freq=50):
         self.pi = pi
         self.address = address
         try:
             self.handle = self.pi.i2c_open(1, self.address)
+            
+            # ==========================================
+            # ★ Deep Sleep 解除 & 強制Wake-Up シーケンス
+            # ==========================================
+            print("[PCA9685] ICのリセットと起床シーケンス実行...")
+            
+            # 1. MODE1レジスタを 0x00 に書き込み (Sleepビットを解除 = 起床)
+            # これにより内部発振器が強制的に動き出します
+            self.pi.i2c_write_byte_data(self.handle, self.MODE1, 0x00)
+            time.sleep(0.01) # 起床待ち
+
+            # 2. 再度設定 (Auto-Increment有効化など)
+            self.pi.i2c_write_byte_data(self.handle, self.MODE1, 0xA1) 
+            time.sleep(0.01)
+
+            # 3. 周波数設定 (set_frequencyメソッド内でスリープ→復帰を行う)
             self.set_frequency(freq)
+
+            # ==========================================
+            # ★ 動作確認用: CH0 強制駆動 (90度)
+            # ==========================================
+            print("[PCA9685] 起動確認: CH0を90度に固定します")
+            # ONタイミング = 0
+            self.pi.i2c_write_byte_data(self.handle, self.LED0_ON_L, 0x00)
+            self.pi.i2c_write_byte_data(self.handle, self.LED0_ON_H, 0x00)
+            # OFFタイミング = 307 (約1.5ms幅 = 90度)
+            self.pi.i2c_write_byte_data(self.handle, self.LED0_OFF_L, 0x33) # 0x33 = 51
+            self.pi.i2c_write_byte_data(self.handle, self.LED0_OFF_H, 0x01) # 0x0100 = 256 -> Total 307
+
         except Exception as e:
-            # i2c_openなどで失敗した場合の対策
             print(f"[!] PCA9685接続エラー: {e}")
             raise e
 
@@ -61,21 +91,21 @@ class PCA9685:
     def set_frequency(self, freq):
         prescale = int(round(25000000.0 / (4096.0 * freq)) - 1)
         
-        # 1. 現在のモード設定を読み込む (これが抜けていました)
+        # 1. 現在のモード設定を読み込む
         old_mode = self.read_reg(self.MODE1)
         
-        # 2. スリープモードにする (既存の設定を生かしつつSleepビットを立てる)
+        # 2. スリープモードにする (設定書き込みのため)
         new_mode = (old_mode & 0x7F) | 0x10 
         self.write_reg(self.MODE1, new_mode) 
         
         # 3. プリスケーラー(周波数)を設定
         self.write_reg(self.PRESCALE, prescale)
         
-        # 4. 元のモードに戻す
+        # 4. 元のモードに戻す (ここでWake-Up)
         self.write_reg(self.MODE1, old_mode)
         time.sleep(0.005)
         
-        # 5. リスタート (Auto Incrementビットも念のため有効化推奨 0xA0 = 10100000)
+        # 5. リスタート
         self.write_reg(self.MODE1, old_mode | 0x80)
 
     def set_pwm(self, channel, on, off):
@@ -182,15 +212,15 @@ class MotorController:
 # --- 映像送信処理 ---
 def send_video():
     cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640) #幅(320標準)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480) #高さ(240標準)
     udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     print(f"[*] 映像送信開始 -> {PC_IP}:{VIDEO_PORT}")
     
     while True:
         ret, frame = cap.read()
         if not ret: continue
-        _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
+        _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50])#画質強度(標準30)
         if len(buffer) < 65000:
             try:
                 udp_sock.sendto(buffer, (PC_IP, VIDEO_PORT))
@@ -201,6 +231,7 @@ def send_video():
 def receive_control(pi):
     # 1. サーボ初期化
     try:
+        # ★ここでPCA9685クラスを呼ぶと、自動的にWake-UpとCH0動作チェックが走ります
         pca = PCA9685(pi)
         
         # チャンネルをシフト: 0→4, 1→5, 2→6, 3→7
@@ -218,7 +249,7 @@ def receive_control(pi):
         current_deg_1 = 0
         current_deg_2 = 90
         
-        print("[*] PCA9685初期化完了: サーボ4,5,6,7 準備OK")
+        print("[*] PCA9685初期化完了: CH0(Test)駆動確認済, CH4,5,6,7 準備OK")
         
     except Exception as e:
         print(f"[!] PCA9685初期化エラー: {e}")
