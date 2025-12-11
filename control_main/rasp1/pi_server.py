@@ -1,4 +1,4 @@
-#rasp1_RAS_ver9
+#rasp1_RAS_ver9.2
 #安定版
 import cv2
 import socket
@@ -44,22 +44,38 @@ class PCA9685:
     def __init__(self, pi, address=0x40, freq=50):
         self.pi = pi
         self.address = address
-        self.handle = self.pi.i2c_open(1, self.address)
-        self.set_frequency(freq)
+        try:
+            self.handle = self.pi.i2c_open(1, self.address)
+            self.set_frequency(freq)
+        except Exception as e:
+            # i2c_openなどで失敗した場合の対策
+            print(f"[!] PCA9685接続エラー: {e}")
+            raise e
 
     def write_reg(self, reg, value):
         self.pi.i2c_write_byte_data(self.handle, reg, value)
     
+    def read_reg(self, reg):
+        return self.pi.i2c_read_byte_data(self.handle, reg)
+    
     def set_frequency(self, freq):
         prescale = int(round(25000000.0 / (4096.0 * freq)) - 1)
-        mode_sleep = 0x10 | 0x20 
-        self.write_reg(self.MODE1, mode_sleep)
+        
+        # 1. 現在のモード設定を読み込む (これが抜けていました)
+        old_mode = self.read_reg(self.MODE1)
+        
+        # 2. スリープモードにする (既存の設定を生かしつつSleepビットを立てる)
+        new_mode = (old_mode & 0x7F) | 0x10 
+        self.write_reg(self.MODE1, new_mode) 
+        
+        # 3. プリスケーラー(周波数)を設定
         self.write_reg(self.PRESCALE, prescale)
-        mode_wake = 0x80 | 0x20 | 0x01
-        self.write_reg(self.MODE1, mode_wake)
-        self.write_reg(self.PRESCALE, prescale)
+        
+        # 4. 元のモードに戻す
         self.write_reg(self.MODE1, old_mode)
         time.sleep(0.005)
+        
+        # 5. リスタート (Auto Incrementビットも念のため有効化推奨 0xA0 = 10100000)
         self.write_reg(self.MODE1, old_mode | 0x80)
 
     def set_pwm(self, channel, on, off):
@@ -187,19 +203,19 @@ def receive_control(pi):
     try:
         pca = PCA9685(pi)
         
-        # ★ チャンネルをシフト: 0→4, 1→5, 2→6, 3→7
+        # チャンネルをシフト: 0→4, 1→5, 2→6, 3→7
         servo0 = Servo(pca, channel=4, min_angle=60, max_angle=120)
         servo1 = Servo(pca, channel=5, min_angle=0, max_angle=180)
         servo2 = Servo(pca, channel=6, min_angle=60, max_angle=130)
         servo3 = Servo(pca, channel=7, min_angle=0, max_angle=180)
 
         servo0.set_angle(90)
-        servo1.set_angle(90)
+        servo1.set_angle(0)
         servo2.set_angle(90)
         servo3.set_angle(90)
         
         current_deg_0 = 90
-        current_deg_1 = 90
+        current_deg_1 = 0
         current_deg_2 = 90
         
         print("[*] PCA9685初期化完了: サーボ4,5,6,7 準備OK")
