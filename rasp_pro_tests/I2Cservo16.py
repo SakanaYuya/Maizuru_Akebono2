@@ -1,3 +1,4 @@
+#停止したI2C基盤を再起動させるコード
 import time
 import pigpio
 
