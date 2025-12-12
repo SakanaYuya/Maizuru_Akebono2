@@ -1,4 +1,6 @@
 # #rasp1_RAS_ver10.1
+#ラズパイの最新版コードの評価ファイル
+
 import cv2
 import socket
 import threading
