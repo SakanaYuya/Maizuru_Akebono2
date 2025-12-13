@@ -48,3 +48,36 @@
 4.  キー入力に基づいて、PCクライアントは対応する制御コマンド ("FORWARD"、"BACK"、"LEFT"、"RIGHT"、"STOP") をTCP経由でRaspberry Piに送信します。
 5.  Raspberry Piサーバーはこれらのコマンドを受信し、処理し (新しいコマンドの場合のみ)、理想的にはGPIOアクションをトリガーします (現在はプレースホルダーです)。
 6.  PCクライアントは、Raspberry Piからの着信ビデオストリームを表示します。
+
+---
+
+## 変更ログ
+
+### 2025年12月8日月曜日
+
+#### 目的:
+`windows/control/control_GUI.py` で実装されているコントローラー入力要素を `RaspberryPi/pc_client.py` に反映させ、`only_rasp1/pi_server.py` でそれらのコマンドを処理できるようにする。
+
+#### 変更点:
+
+1.  **`RaspberryPi/pc_client.py` の更新:**
+    *   `windows/control/control_GUI.py` から `AXIS_MAPPING`, `BUTTON_MAPPING`, `HAT_MAPPING` のマッピング情報をコピーして追加しました。
+    *   `send_control` 関数を以下のように変更しました:
+        *   `pygame.joystick.init()` を追加し、ジョイスティックの検出と初期化を行いました。
+        *   ジョイスティックが接続されていない場合や、接続・切断された場合のメッセージ表示および再初期化ロジックを追加しました (`pygame.JOYDEVICEADDED`, `pygame.JOYDEVICEREMOVED` イベント処理)。
+        *   ジョイスティックの左スティック (`axis 0`, `axis 1`)、十字キー (`hat 0`)、ボタン (`button 0`～`3`など)、およびトリガー (`axis 4`, `axis 5`) の入力をポーリングし、それらに基づいて以下の新しいコマンドを生成するようにしました:
+            *   アナログスティック: `FORWARD`, `BACK`, `LEFT`, `RIGHT` (閾値 `-0.5` / `0.5` で判断)
+            *   十字キー: `DPAD_UP`, `DPAD_DOWN`, `DPAD_LEFT`, `DPAD_RIGHT`
+            *   ボタン: `BUTTON_A`, `BUTTON_B`, `BUTTON_X`, `BUTTON_Y`
+            *   トリガー: `TRIGGER_LT`, `TRIGGER_RT` (閾値 `0.5` で判断)
+        *   `last_command` 変数を導入し、前回の送信コマンドと異なる場合にのみTCPでコマンドを送信するように最適化しました。これにより、Raspberry Pi側での不要な重複処理を軽減します。
+        *   既存のWASDキー入力は、ジョイスティックからの明示的なコマンドがない（`current_command == "STOP"` の状態）場合にのみ有効となるように調整し、ジョイスティックとキーボードの併用、またはコントローラーが接続されていない場合の代替操作を可能にしました。
+
+2.  **`only_rasp1/pi_server.py` の更新:**
+    *   `receive_control` 関数内のGPIO制御ブロックに、`pc_client.py` から送信される可能性のある新しいコマンド (`DPAD_UP`, `DPAD_DOWN`, `DPAD_LEFT`, `DPAD_RIGHT`, `BUTTON_A`, `BUTTON_B`, `BUTTON_X`, `BUTTON_Y`, `TRIGGER_LT`, `TRIGGER_RT`) に対する `elif` 文のプレースホルダーを追加しました。
+    *   これらのコマンドに対する具体的なGPIO操作は、現在のところ `pass` としています。
+
+#### 影響:
+*   PCクライアントは、ゲームコントローラー（検出された場合）またはキーボード（WASD）からの入力に基づいて、より詳細な制御コマンドをRaspberry Piに送信できるようになりました。
+*   Raspberry Piサーバーは、これらの新しいコマンドを受信し、それぞれのコマンドに対応するGPIOアクションをトリガーする準備ができました（実際のGPIO実装はまだです）。
+*   コマンド送信の効率が向上し、Raspberry Pi側での重複した状態変更の処理が削減されます。
