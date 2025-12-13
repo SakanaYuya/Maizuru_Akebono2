@@ -265,14 +265,14 @@ def receive_control(pi):
         servo2 = Servo(pca, channel=6, min_angle=60, max_angle=130)
         
         servo_arm_l = Servo(pca, channel=SERVO_CH_ARM_L, min_angle=0, max_angle=180)
-        servo_arm_r = Servo(pca, channel=SERVO_CH_ARM_R, min_angle=0, max_angle=180)
+        servo_arm_r = Servo(pca, channel=SERVO_CH_ARM_R, min_angle=3, max_angle=180)
         
         servo0.set_angle(90)
         servo1.set_angle(0)
         servo2.set_angle(90)
         # 初期位置: 収納
         servo_arm_l.set_angle(180)
-        servo_arm_r.set_angle(0)
+        servo_arm_r.set_angle(3)
         
         current_deg_0 = 90
         current_deg_1 = 0

@@ -1,4 +1,4 @@
-#rasp2_pc_console
+#rasp2_pc_console_V2
 import cv2
 import socket
 import numpy as np
@@ -41,7 +41,8 @@ def receive_video():
                 elif VIDEO_ROTATION == 270:
                     frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
                 
-                cv2.imshow("Camera (Press Q in Input Window to Quit)", frame)
+                # ウィンドウ名も修正
+                cv2.imshow("Camera View (Press Q in Control Window to Quit)", frame)
                 
             cv2.waitKey(1)
         except socket.timeout:
@@ -56,11 +57,11 @@ def receive_video():
 def main():
     global is_running, last_sent_json
 
-    # 1. Pygame初期化 (キー入力取得のため必須)
+    # 1. Pygame初期化
     pygame.init()
     # フォーカス用の小さなウィンドウを作成
-    screen = pygame.display.set_mode((400, 100))
-    pygame.display.set_caption("Click Here to Control")
+    screen = pygame.display.set_mode((400, 150)) # 縦を少し広げて情報を追加
+    pygame.display.set_caption("Control Panel (Click Here to Control)")
     font = pygame.font.SysFont(None, 24)
 
     # 2. TCP接続
@@ -69,13 +70,15 @@ def main():
         print(f"[*] 接続試行中... {RPI_IP}:{CONTROL_PORT}")
         tcp_sock.connect((RPI_IP, CONTROL_PORT))
         print(f"[*] 接続成功！")
+        
+        # コンソールヘルプメッセージ
         print("------------------------------------------------")
-        print("【重要】操作するには「Click Here to Control」という")
-        print("       小さな黒いウィンドウをクリックしてください。")
+        print("【重要】操作するには「Control Panel」ウィンドウを")
+        print("       クリックしてフォーカスしてください。")
         print("------------------------------------------------")
-        print(" [W/S]: 左足, [O/L]: 右足")
-        print(" [5/6]: 上下, [7/8]: 左右")
-        print(" [Q]  : 終了")
+        print(" [W/S]: 左車輪 (前後), [O/L]: 右車輪 (前後)")
+        print(" [3/4]: カメラ上下, [8/9]: カメラ左右")
+        print(" [Q]  : 終了")
         print("------------------------------------------------")
     except Exception as e:
         print(f"[!] 接続失敗: {e}")
@@ -92,8 +95,22 @@ def main():
 
         # 画面描画 (ユーザーへの指示)
         screen.fill((0, 0, 0))
-        text = font.render("Focus HERE & Press Keys", True, (255, 255, 255))
-        screen.blit(text, (20, 40))
+        
+        # コントロール手法の記述
+        instructions = [
+            "Focus HERE & Press Keys",
+            "---------------------------",
+            "Wheels: [W/S] (Left), [O/L] (Right)",
+            "Camera: [3/4] (Up/Down), [8/9] (Left/Right)",
+            "Quit: [Q]"
+        ]
+        
+        y_offset = 10
+        for line in instructions:
+            text = font.render(line, True, (255, 255, 255))
+            screen.blit(text, (20, y_offset))
+            y_offset += 25
+            
         pygame.display.flip()
 
         # キー入力取得
@@ -106,7 +123,7 @@ def main():
             break
 
         # --- 入力判定 ---
-        # 足回り
+        # 足回り (変更なし)
         ls_y = 0.0
         if keys[pygame.K_w]: ls_y = -1.0
         elif keys[pygame.K_s]: ls_y = 1.0
@@ -115,14 +132,16 @@ def main():
         if keys[pygame.K_o]: rs_y = -1.0
         elif keys[pygame.K_l]: rs_y = 1.0
 
-        # カメラ
+        # カメラ (キー変更)
+        # 上下 (HAT_Y): 5/6 -> 3/4
         hat_y = 0
-        if keys[pygame.K_5]: hat_y = 1
-        elif keys[pygame.K_6]: hat_y = -1
+        if keys[pygame.K_3]: hat_y = 1
+        elif keys[pygame.K_4]: hat_y = -1
         
+        # 左右 (HAT_X): 7/8 -> 8/9
         hat_x = 0
-        if keys[pygame.K_8]: hat_x = 1
-        elif keys[pygame.K_7]: hat_x = -1
+        if keys[pygame.K_9]: hat_x = 1 # 9(右) -> HAT_X=1
+        elif keys[pygame.K_8]: hat_x = -1 # 8(左) -> HAT_X=-1 
 
         # データ作成
         data = {
@@ -139,29 +158,28 @@ def main():
         if json_str != last_sent_json:
             try:
                 tcp_sock.sendall((json_str + "\n").encode('utf-8'))
-                last_received_json = json_str
-                
+                last_sent_json = json_str # ログ出力位置を修正
+
                 # ログ出力作成
                 log_parts = []
-                if ls_y < 0: log_parts.append("左:前進")
-                elif ls_y > 0: log_parts.append("左:後退")
+                # モーター制御はラズパイ側でクロス/反転処理されているため、ここではPC側の入力通りにログを出す
+                if ls_y < 0: log_parts.append("左W:前進")
+                elif ls_y > 0: log_parts.append("左S:後退")
                 
-                if rs_y < 0: log_parts.append("右:前進")
-                elif rs_y > 0: log_parts.append("右:後退")
+                if rs_y < 0: log_parts.append("右O:前進")
+                elif rs_y > 0: log_parts.append("右L:後退")
 
-                if hat_y == 1: log_parts.append("Cam:上")
-                elif hat_y == -1: log_parts.append("Cam:下")
+                if hat_y == 1: log_parts.append("Cam3:上")
+                elif hat_y == -1: log_parts.append("Cam4:下")
                 
-                if hat_x == -1: log_parts.append("Cam:左")
-                elif hat_x == 1: log_parts.append("Cam:右")
+                if hat_x == -1: log_parts.append("Cam8:左")
+                elif hat_x == 1: log_parts.append("Cam9:右")
                 
                 if not log_parts:
                     print("[待機] 入力なし (停止信号送信)")
                 else:
                     print(f"[送信] {' '.join(log_parts)}")
                 
-                last_sent_json = json_str
-
             except Exception as e:
                 print(f"[!] 送信エラー: {e}")
                 is_running = False

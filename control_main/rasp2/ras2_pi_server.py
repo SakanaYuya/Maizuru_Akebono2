@@ -1,5 +1,5 @@
-#rasp2_gpio_servo_v7.7
-#30-180model
+#rasp2_gpio_servo_v9
+#Auto_Video_Flip_Added
 import cv2
 import socket
 import threading
@@ -27,22 +27,26 @@ PIN_DIR_RIGHT = 21
 
 # --- サーボ (Servo) ---
 PIN_SERVO_TILT = 18 # Top (0-180度 自由)
-PIN_SERVO_PAN  = 19 # Under (90-135度 制限あり)
+PIN_SERVO_PAN  = 19 # Under (35-180度 制限あり)
 
 # ==========================================
 
 # --- 速度・動作設定 ---
-SPEED_SCALE = 0.5   # モーター速度 (0.3=遅い ～ 1.0=全速)
+SPEED_SCALE = 0.7   # モーター速度
 
-# ★ サーボの移動速度 (1回のループで何度動くか)
-# 値を大きくすると速く、小さくすると遅く（滑らかに）なります
-SERVO_SPEED_TILT = 10  # PIN 18用 (キビキビ)
-SERVO_SPEED_PAN  = 2  # PIN 19用 (ゆっくり)
+# サーボ移動速度
+SERVO_SPEED_TILT = 10  # PIN 18
+SERVO_SPEED_PAN  = 2   # PIN 19
 
 PWM_FREQ = 20000
 DEADZONE = 0.15
 SERVO_MIN_PULSE = 500
 SERVO_MAX_PULSE = 2500
+
+# ★ スレッド間で角度情報を共有するための辞書
+SHARED_STATE = {
+    "tilt": 90  # 初期値
+}
 
 class DirectServo:
     def __init__(self, pi, pin, init_angle=0):
@@ -53,7 +57,6 @@ class DirectServo:
         self.set_angle_instant(init_angle)
 
     def set_angle_instant(self, angle):
-        # 物理限界としての0-180ガード
         if angle < 0: angle = 0
         if angle > 180: angle = 180
         
@@ -123,11 +126,24 @@ def send_video():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
     udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     print(f"[*] 映像送信開始 -> {PC_IP}:{VIDEO_PORT}")
+    
     while True:
         ret, frame = cap.read()
         if not ret: 
             time.sleep(0.1)
             continue
+        
+        # ==========================================
+        # ★ V9追加: サーボ角度連動 自動回転ロジック
+        # ==========================================
+        # 現在のTilt角度を参照
+        current_tilt_for_video = SHARED_STATE["tilt"]
+        
+        # 100度以上なら180度回転 (上下反転)
+        if current_tilt_for_video >= 100:
+            frame = cv2.rotate(frame, cv2.ROTATE_180)
+        
+        # JPEGエンコード
         _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
         if len(buffer) < 65000:
             try:
@@ -136,14 +152,16 @@ def send_video():
         time.sleep(0.03)
 
 def receive_control(pi):
-    # ★ 初期位置設定
-    init_pan_angle = 90  # PIN 19: Under
-    init_tilt_angle = 90 # PIN 18: Top
+    init_pan_angle = 90
+    init_tilt_angle = 90
+
+    # 共有状態の初期化
+    SHARED_STATE["tilt"] = init_tilt_angle
 
     try:
         servo_tilt = DirectServo(pi, PIN_SERVO_TILT, init_angle=init_tilt_angle)
         servo_pan = DirectServo(pi, PIN_SERVO_PAN, init_angle=init_pan_angle)
-        print(f"[*] サーボ初期化: Pan(19)={init_pan_angle}, Tilt(18)={init_tilt_angle}")
+        print(f"[*] サーボ初期化: Pan={init_pan_angle}, Tilt={init_tilt_angle}")
     except Exception as e:
         print(f"[!] サーボエラー: {e}")
         return
@@ -193,33 +211,33 @@ def receive_control(pi):
                         val_ls = raw_ls_y * SPEED_SCALE
                         val_rs = raw_rs_y * SPEED_SCALE
                         
-                        # クロス配線＆前後逆転適用済み
                         motor_left.set_speed(val_rs) 
                         motor_right.set_speed(-val_ls)
 
-                        # ==========================================
-                        # ★ サーボ制御 V7
-                        # ==========================================
+                        # --- サーボ制御 ---
 
-                        # --- PIN 18: Tilt (Top) 自由移動 ---
+                        # Tilt (PIN 18)
                         hat_y = ctl.get("HAT_Y", 0)
                         if hat_y != 0:
                             if hat_y == 1: current_tilt += SERVO_SPEED_TILT
                             elif hat_y == -1: current_tilt -= SERVO_SPEED_TILT
                             
-                            # 0〜180度 全域許可
                             current_tilt = max(0, min(180, current_tilt))
                             servo_tilt.set_angle_instant(current_tilt)
+                            print(f"Tilt: {current_tilt}")
+                            
+                            # ★ V9追加: 映像スレッドへ通知するために状態更新
+                            SHARED_STATE["tilt"] = current_tilt
 
-                        # --- PIN 19: Pan (Under) 制限あり ---
+                        # Pan (PIN 19)
                         hat_x = ctl.get("HAT_X", 0)
                         if hat_x != 0:
                             if hat_x == 1: current_pan -= SERVO_SPEED_PAN
                             elif hat_x == -1: current_pan += SERVO_SPEED_PAN
                             
-                            #  10度〜135度 の範囲制限 (維持)
-                            current_pan = max(30, min(180, current_pan))
+                            current_pan = max(35, min(180, current_pan))
                             servo_pan.set_angle_instant(current_pan)
+                            print(f"Pan : {current_pan}")
 
                 except Exception as e:
                     print(f"Loop Error: {e}")
@@ -228,9 +246,10 @@ def receive_control(pi):
         print("[!] 切断 - 停止")
         motor_left.stop()
         motor_right.stop()
-        # 安全位置へ戻す
         servo_pan.move_to_slowly(init_pan_angle) 
-        servo_tilt.move_to_slowly(init_tilt_angle) 
+        servo_tilt.move_to_slowly(init_tilt_angle)
+        # 状態リセット
+        SHARED_STATE["tilt"] = init_tilt_angle
 
 if __name__ == "__main__":
     pi = pigpio.pi()
