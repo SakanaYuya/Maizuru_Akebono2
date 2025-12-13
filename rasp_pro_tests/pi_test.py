@@ -1,13 +1,11 @@
-# #rasp1_RAS_ver10.1
-#ラズパイの最新版コードの評価ファイル
-
+# rasp1_RAS_ver12
+# V11.1 + 追加モーター (GPIO24/25: 展開後ON/収納時OFF)
 import cv2
 import socket
 import threading
 import time
 import json
 import pigpio
-import math
 
 # --- 通信設定 ---
 PC_IP = "192.168.50.10"
@@ -15,75 +13,78 @@ VIDEO_PORT = 5005
 MY_IP = "0.0.0.0"
 CONTROL_PORT = 5006
 
-# ==========================================
-# ★ ピン設定 (GPIO BCM番号)
-# ==========================================
+# --- リミットスイッチ設定 ---
+PIN_SW_DEPLOY = 5   # 展開完了 (Lowで停止)
+PIN_SW_STORE  = 6   # 収納完了 (Lowで停止)
 
-# 1. 足回り
+# --- モーター制御設定 ---
 PIN_PWM_LEFT = 12
 PIN_DIR_LEFT = 20
 PIN_PWM_RIGHT = 13
 PIN_DIR_RIGHT = 21
 
-# 2. 回収機構展開 (Deploy)
-PIN_PWM_DEPLOY = 18
-PIN_DIR_DEPLOY = 22
+PIN_PWM_LEFT_AUX = 18   # 展開機構
+PIN_DIR_LEFT_AUX = 22
 
-# 3. ウィンチ
-PIN_PWM_RIGHT_AUX = 19
+PIN_PWM_RIGHT_AUX = 19  # ウィンチ
 PIN_DIR_RIGHT_AUX = 23
 
-# 4. 回収ブレード (現状は操作なし、定義のみ)
-PIN_PWM_BLADE = 24
-PIN_DIR_BLADE = 25
-
-# 5. リミットスイッチ (プルアップ設定)
-PIN_LIMIT_1 = 5         # SW展開用
-PIN_LIMIT_2 = 6         # SW収納用
-
-# 6. LED
-PIN_PWM_LED = 26
-
-# ==========================================
+# ★ V12 追加モーター (回転機構など)
+PIN_PWM_EXTRA = 24
+PIN_DIR_EXTRA = 25
 
 PWM_FREQ = 20000
-LED_FREQ = 1000
 DEADZONE = 0.15
 TRIGGER_MIN_SPEED = 0.3
 
-# --- クラス定義 ---
-class LedController:
-    def __init__(self, pi, pin):
-        self.pi = pi
-        self.pin = pin
-        self.pi.set_mode(self.pin, pigpio.OUTPUT)
-        self.pi.set_PWM_frequency(self.pin, LED_FREQ)
-        self.pi.set_PWM_range(self.pin, 255)
-        self.set_brightness(0)
-    def set_brightness(self, value):
-        if value < 0: value = 0
-        if value > 1.0: value = 1.0
-        duty = int(value * 255)
-        self.pi.set_PWM_dutycycle(self.pin, duty)
-    def off(self):
-        self.pi.set_PWM_dutycycle(self.pin, 0)
+# --- サーボ設定 (C=12, D=13) ---
+SERVO_CH_ARM_L = 12     # 左アーム (ch C)
+SERVO_CH_ARM_R = 13     # 右アーム (ch D)
 
+# サーボ動作速度設定
+ARM_MOVE_DELAY = 0.015 
+ARM_MOVE_STEP  = 2
+
+# --- ログ用コールバック関数 ---
+def sw_log_callback(gpio, level, tick):
+    state_str = "High (OPEN)" if level == 1 else "Low (HIT)"
+    name = "DEPLOY(5)" if gpio == PIN_SW_DEPLOY else "STORE(6)"
+    print(f"[Log] SW {name} changed to: {state_str}")
+
+# --- クラス定義 ---
 class PCA9685:
     MODE1 = 0x00
     PRESCALE = 0xFE
     LED0_ON_L = 0x06
+    LED0_ON_H = 0x07
+    LED0_OFF_L = 0x08
+    LED0_OFF_H = 0x09
     def __init__(self, pi, address=0x40, freq=50):
         self.pi = pi
         self.address = address
-        self.handle = self.pi.i2c_open(1, self.address)
-        self.set_frequency(freq)
+        try:
+            self.handle = self.pi.i2c_open(1, self.address)
+            self.pi.i2c_write_byte_data(self.handle, self.MODE1, 0x00)
+            time.sleep(0.01)
+            self.pi.i2c_write_byte_data(self.handle, self.MODE1, 0xA1)
+            time.sleep(0.01)
+            self.set_frequency(freq)
+            self.pi.i2c_write_byte_data(self.handle, self.LED0_ON_L, 0x00)
+            self.pi.i2c_write_byte_data(self.handle, self.LED0_ON_H, 0x00)
+            self.pi.i2c_write_byte_data(self.handle, self.LED0_OFF_L, 0x33)
+            self.pi.i2c_write_byte_data(self.handle, self.LED0_OFF_H, 0x01)
+        except Exception as e:
+            print(f"[!] PCA9685 Error: {e}")
+            raise e
     def write_reg(self, reg, value):
         self.pi.i2c_write_byte_data(self.handle, reg, value)
+    def read_reg(self, reg):
+        return self.pi.i2c_read_byte_data(self.handle, reg)
     def set_frequency(self, freq):
         prescale = int(round(25000000.0 / (4096.0 * freq)) - 1)
-        old_mode = self.pi.i2c_read_byte_data(self.handle, self.MODE1)
-        mode_sleep = (old_mode & 0x7F) | 0x10
-        self.write_reg(self.MODE1, mode_sleep)
+        old_mode = self.read_reg(self.MODE1)
+        new_mode = (old_mode & 0x7F) | 0x10 
+        self.write_reg(self.MODE1, new_mode) 
         self.write_reg(self.PRESCALE, prescale)
         self.write_reg(self.MODE1, old_mode)
         time.sleep(0.005)
@@ -93,18 +94,15 @@ class PCA9685:
         self.pi.i2c_write_i2c_block_data(self.handle, base_reg, [
             on & 0xFF, on >> 8, off & 0xFF, off >> 8
         ])
-    def close(self):
-        self.pi.i2c_close(self.handle)
 
 class Servo:
     def __init__(self, pca, channel, min_pulse=500, max_pulse=2400, min_angle=0, max_angle=180):
         self.pca = pca
         self.channel = channel
-        self.min_pulse = min_pulse
-        self.max_pulse = max_pulse
+        self.min_pulse = min_pulse 
+        self.max_pulse = max_pulse 
         self.min_angle = min_angle
         self.max_angle = max_angle
-        self.current_angle = 0
     def angle_to_pulse(self, angle):
         if angle < self.min_angle: angle = self.min_angle
         if angle > self.max_angle: angle = self.max_angle
@@ -114,7 +112,6 @@ class Servo:
     def set_angle(self, angle):
         count = self.angle_to_pulse(angle)
         self.pca.set_pwm(self.channel, 0, count)
-        self.current_angle = angle
 
 class MotorController:
     def __init__(self, pi, pwm_pin, dir_pin, name="Motor"):
@@ -152,13 +149,12 @@ class MotorController:
         self.pi.set_PWM_dutycycle(self.pwm_pin, 0)
         self.current_speed = 0.0
 
-# --- 映像送信 ---
+# --- 映像送信処理 ---
 def send_video():
     cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    print(f"[*] 映像送信開始 -> {PC_IP}:{VIDEO_PORT}")
     while True:
         ret, frame = cap.read()
         if not ret: continue
@@ -166,197 +162,269 @@ def send_video():
         if len(buffer) < 65000:
             try:
                 udp_sock.sendto(buffer, (PC_IP, VIDEO_PORT))
-            except Exception: pass
+            except Exception: pass 
         time.sleep(0.03)
 
-# --- メイン制御 ---
+# =========================================================
+# 自動サーボ移動関数
+# =========================================================
+def move_arms_smooth(servo_l, servo_r, deploy, conn):
+    action_name = "アーム展開" if deploy else "アーム収納"
+    print(f"LOG: {action_name} 開始")
+    start_deg = 0
+    end_deg = 180
+    conn.settimeout(0.01)
+    try:
+        for i in range(start_deg, end_deg + 1, ARM_MOVE_STEP):
+            # 緊急停止チェック
+            try:
+                data = conn.recv(1024)
+                if data:
+                    js_str = data.decode('utf-8').strip()
+                    if '}{' in js_str: js_str = '{' + js_str.split('}{')[-1]
+                    try:
+                        js = json.loads(js_str)
+                        ctl = js.get("controller", {})
+                        if ctl.get("LS_PRESS") or ctl.get("RS_PRESS"):
+                            print("LOG: ! アーム動作中断 (緊急停止) !")
+                            return False
+                    except: pass
+            except socket.timeout: pass
+            except: pass
+
+            if deploy:
+                angle_l = 180 - i
+                angle_r = 0 + i
+            else:
+                angle_l = 0 + i
+                angle_r = 180 - i
+            
+            servo_l.set_angle(angle_l)
+            servo_r.set_angle(angle_r)
+            time.sleep(ARM_MOVE_DELAY)
+    finally:
+        conn.settimeout(None)
+    
+    print(f"LOG: {action_name} 完了")
+    return True
+
+# =========================================================
+# 自動シーケンス関数 (モーター移動)
+# =========================================================
+def run_motor_sequence(pi, motor, target_pin, speed, conn, seq_name):
+    print(f"LOG: モーター移動開始 [{seq_name}] -> 目標GPIO {target_pin}")
+    conn.settimeout(0.02) 
+    success = True
+    try:
+        while True:
+            if pi.read(target_pin) == 0: 
+                print(f"LOG: 目標到達 ({seq_name}) - 停止")
+                break
+            try:
+                data = conn.recv(1024)
+                if data:
+                    js_str = data.decode('utf-8').strip()
+                    if '}{' in js_str: js_str = '{' + js_str.split('}{')[-1]
+                    try:
+                        js = json.loads(js_str)
+                        ctl = js.get("controller", {})
+                        if ctl.get("LS_PRESS") or ctl.get("RS_PRESS"):
+                            print("LOG: ! 緊急停止 (操作入力) !")
+                            success = False
+                            break
+                    except: pass
+            except socket.timeout: pass
+            except Exception:
+                success = False
+                break
+            
+            motor.set_speed(speed)
+            time.sleep(0.005)
+    finally:
+        motor.stop()
+        conn.settimeout(None)
+    return success
+
+# --- 操作受信 & 制御処理 ---
 def receive_control(pi):
-    # 初期化
+    # GPIO設定
+    pi.set_mode(PIN_SW_DEPLOY, pigpio.INPUT)
+    pi.set_pull_up_down(PIN_SW_DEPLOY, pigpio.PUD_UP)
+    pi.set_mode(PIN_SW_STORE, pigpio.INPUT)
+    pi.set_pull_up_down(PIN_SW_STORE, pigpio.PUD_UP)
+
+    cb_deploy = pi.callback(PIN_SW_DEPLOY, pigpio.EITHER_EDGE, sw_log_callback)
+    cb_store = pi.callback(PIN_SW_STORE, pigpio.EITHER_EDGE, sw_log_callback)
+    print("[*] SW Log Callbacks Registered")
+
+    # サーボ初期化
     try:
         pca = PCA9685(pi)
         servo0 = Servo(pca, channel=4, min_angle=60, max_angle=120)
         servo1 = Servo(pca, channel=5, min_angle=0, max_angle=180)
         servo2 = Servo(pca, channel=6, min_angle=60, max_angle=130)
-        servo3 = Servo(pca, channel=7, min_angle=0, max_angle=180)
-        servo0.set_angle(90); servo1.set_angle(90); servo2.set_angle(90)
-        current_deg_0 = 90; current_deg_1 = 90; current_deg_2 = 90
-        print("[*] サーボ初期化OK")
-    except Exception as e:
-        print(f"[!] サーボ初期化NG: {e}")
-        import traceback
-        traceback.print_exc() # 詳細なエラー箇所を表示
+        
+        servo_arm_l = Servo(pca, channel=SERVO_CH_ARM_L, min_angle=0, max_angle=180)
+        servo_arm_r = Servo(pca, channel=SERVO_CH_ARM_R, min_angle=0, max_angle=180)
+        
+        servo0.set_angle(90)
+        servo1.set_angle(0)
+        servo2.set_angle(90)
+        # 初期位置: 収納
+        servo_arm_l.set_angle(180)
+        servo_arm_r.set_angle(0)
+        
+        current_deg_0 = 90
+        current_deg_1 = 0
+        current_deg_2 = 90
+        print(f"[*] Servo Init OK: Arms on CH {SERVO_CH_ARM_L}(C), {SERVO_CH_ARM_R}(D)")
+    except Exception as e: 
+        print(f"[!] Servo Init Error: {e}")
         pca = None
-
+    
+    # モーター初期化
     try:
-        motor_left = MotorController(pi, PIN_PWM_LEFT, PIN_DIR_LEFT, "左足")
-        motor_right = MotorController(pi, PIN_PWM_RIGHT, PIN_DIR_RIGHT, "右足")
-        motor_deploy = MotorController(pi, PIN_PWM_DEPLOY, PIN_DIR_DEPLOY, "展開")
+        motor_left = MotorController(pi, PIN_PWM_LEFT, PIN_DIR_LEFT, "左")
+        motor_right = MotorController(pi, PIN_PWM_RIGHT, PIN_DIR_RIGHT, "右")
+        motor_left_aux = MotorController(pi, PIN_PWM_LEFT_AUX, PIN_DIR_LEFT_AUX, "展開")
         motor_right_aux = MotorController(pi, PIN_PWM_RIGHT_AUX, PIN_DIR_RIGHT_AUX, "ウィンチ")
-
-        # 定義のみ維持
-        motor_blade = MotorController(pi, PIN_PWM_BLADE, PIN_DIR_BLADE, "ブレード")
-
-        led_main = LedController(pi, PIN_PWM_LED)
-
-        # ★ リミットスイッチ: プルアップ設定
-        pi.set_mode(PIN_LIMIT_1, pigpio.INPUT)
-        pi.set_mode(PIN_LIMIT_2, pigpio.INPUT)
-        pi.set_pull_up_down(PIN_LIMIT_1, pigpio.PUD_UP) # PULL_UP
-        pi.set_pull_up_down(PIN_LIMIT_2, pigpio.PUD_UP) # PULL_UP
-
-        print("[*] モーター/LED/SW(Pull-Up) 初期化OK")
-    except Exception as e:
-        print(f"[!] HW初期化エラー: {e}")
-        return
+        
+        # ★ V12 追加モーター
+        motor_extra = MotorController(pi, PIN_PWM_EXTRA, PIN_DIR_EXTRA, "追加モーター")
+        print("[*] Extra Motor Init OK (GPIO 24/25)")
+        
+    except Exception: return
 
     tcp_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     tcp_server.bind((MY_IP, CONTROL_PORT))
     tcp_server.listen(1)
-    print(f"[*] 待機中: {CONTROL_PORT}")
-
-    start_time = time.time()
-
-    # 状態監視用の前回の値
-    last_sw1 = pi.read(PIN_LIMIT_1)
-    last_sw2 = pi.read(PIN_LIMIT_2)
-
+    print(f"[*] V12 Ready: TCP {CONTROL_PORT}")
+    
     while True:
         conn, addr = tcp_server.accept()
-        print(f"[*] 接続: {addr}")
-
+        print(f"[*] Connected: {addr}")
+        
         with conn:
             last_received_data = None
+            
             while True:
                 try:
-                    # LEDデモ
-                    elapsed = time.time() - start_time
-                    led_main.set_brightness((math.sin(elapsed * 3) + 1) / 2)
-
-                    # ----------------------------------------------------
-                    # ★ リミットスイッチのログ出力修正部分 (プルアップ対応)
-                    # ----------------------------------------------------
-                    curr_sw1 = pi.read(PIN_LIMIT_1) # Pull-Up: 0=ON (GND短絡時), 1=OFF
-                    curr_sw2 = pi.read(PIN_LIMIT_2)
-
-                    if curr_sw1 != last_sw1:
-                        if curr_sw1 == 0: # 0でONとみなす
-                            print("LOG: SW展開動作 (ON 検知)")
-                        else:
-                            print("LOG: SW展開動作 (OFF 開放)")
-                        last_sw1 = curr_sw1
-
-                    if curr_sw2 != last_sw2:
-                        if curr_sw2 == 0: # 0でONとみなす
-                            print("LOG: SW収納動作 (ON 検知)")
-                        else:
-                            print("LOG: SW収納動作 (OFF 開放)")
-                        last_sw2 = curr_sw2
-                    # ----------------------------------------------------
-
-                    conn.settimeout(0.1)
-                    try:
-                        data = conn.recv(1024)
-                    except socket.timeout:
-                        continue
+                    data = conn.recv(1024)
                     if not data: break
-
+                    
                     received_json_str = data.decode('utf-8').strip()
                     if not received_json_str: continue
+                    
                     try:
                         current_data = json.loads(received_json_str)
                     except json.JSONDecodeError: continue
-
+                    
                     if current_data != last_received_data:
                         last_received_data = current_data
                         ctl = current_data.get("controller", {})
 
-                        # --- 動作ログ付き制御 ---
+                        # =========================================
+                        # ★ V12 自動展開/収納シーケンス
+                        # =========================================
+                        
+                        # --- 展開 (LT > 50%) ---
+                        lt_val = ctl.get("TRIGGER_LT", -1.0)
+                        lt_norm = (lt_val + 1.0) / 2.0
+                        
+                        if lt_norm > 0.5:
+                            # 1. モーター移動 (展開位置へ)
+                            if run_motor_sequence(pi, motor_left_aux, PIN_SW_DEPLOY, 1.0, conn, "展開移動"):
+                                # 2. アーム展開 (L:180->0)
+                                if pca: 
+                                    if move_arms_smooth(servo_arm_l, servo_arm_r, deploy=True, conn=conn):
+                                        # ★ 3. 追加モーター回転開始 (DIR=0, Speed=1.0)
+                                        print("LOG: 展開完了 -> 追加モーター回転開始")
+                                        motor_extra.set_speed(-1.0) # DIR=1になるが、ひとまず1.0で回転
 
-                        # 足回り
-                        ls_y = -ctl.get("LS_Y", 0.0)
-                        rs_y = -ctl.get("RS_Y", 0.0)
-                        motor_left.set_speed(ls_y)
-                        motor_right.set_speed(rs_y)
+                            last_received_data = None
+                            continue
 
-                        # デバッグ出力を追加
-                        if abs(ls_y) > DEADZONE or abs(rs_y) > DEADZONE:
-                             print(f"LOG: 足回り L={ls_y:+.2f}, R={rs_y:+.2f}")
+                        # --- 収納 (LB ボタン) ---
+                        if ctl.get("BUTTON_LB", False):
+                            # ★ 0. 追加モーター停止 (最優先)
+                            print("LOG: 収納開始 -> 追加モーター停止")
+                            motor_extra.stop()
 
-                        # 展開機構 (Deploy)
-                        lb_pressed = ctl.get("BUTTON_LB", False)
-                        lt_val = (ctl.get("TRIGGER_LT", 0.0) + 1.0) / 2.0
+                            # 1. アーム収納 (L:0->180)
+                            if pca: 
+                                if move_arms_smooth(servo_arm_l, servo_arm_r, deploy=False, conn=conn):
+                                    time.sleep(0.5) 
+                                    # 2. モーター移動 (収納位置へ)
+                                    run_motor_sequence(pi, motor_left_aux, PIN_SW_STORE, -1.0, conn, "収納移動")
+                            
+                            last_received_data = None
+                            continue
 
-                        current_deploy_speed = 0.0
-                        if lb_pressed:
-                            current_deploy_speed = -1.0
-                            print("LOG: Deploy <BACK> (LB)")
-                        elif lt_val > 0.1:
-                            current_deploy_speed = TRIGGER_MIN_SPEED + lt_val * (1.0 - TRIGGER_MIN_SPEED)
-                            print(f"LOG: Deploy <FWD> (LT) {current_deploy_speed:.2f}")
+                        # 手動制御
+                        motor_left.set_speed(-ctl.get("LS_Y", 0.0))
+                        motor_right.set_speed(-ctl.get("RS_Y", 0.0))
 
-                        if current_deploy_speed != 0:
-                            motor_deploy.set_speed(current_deploy_speed)
+                        if lt_norm > 0.1 and lt_norm <= 0.5:
+                            speed = TRIGGER_MIN_SPEED + lt_norm * (1.0 - TRIGGER_MIN_SPEED)
+                            motor_left_aux.set_speed(speed)
                         else:
-                            motor_deploy.stop()
+                            motor_left_aux.stop()
 
-                        # 回収ブレード (停止)
-                        motor_blade.stop()
-
-                        # 右ウィンチ
-                        rb = ctl.get("BUTTON_RB", False)
-                        rt_val = (ctl.get("TRIGGER_RT", 0.0) + 1.0) / 2.0
-
-                        current_rw_speed = 0.0
-                        if rb:
-                            current_rw_speed = 1.0
-                            print("LOG: R-Winch <FWD> (RB)")
-                        elif rt_val > 0.1:
-                            spd = TRIGGER_MIN_SPEED + rt_val * (1.0 - TRIGGER_MIN_SPEED)
-                            current_rw_speed = -spd
-                            print(f"LOG: R-Winch <BACK> (RT) {current_rw_speed:.2f}")
-
-                        if current_rw_speed != 0:
-                            motor_right_aux.set_speed(current_rw_speed)
+                        rb_pressed = ctl.get("BUTTON_RB", False)
+                        rt_val = ctl.get("TRIGGER_RT", -1.0)
+                        rt_norm = (rt_val + 1.0) / 2.0
+                        
+                        if rb_pressed:
+                            motor_right_aux.set_speed(1.0)
+                        elif rt_norm > 0.1:
+                            speed = TRIGGER_MIN_SPEED + rt_norm * (1.0 - TRIGGER_MIN_SPEED)
+                            motor_right_aux.set_speed(-speed)
                         else:
                             motor_right_aux.stop()
-
-                        # サーボ
+                        
                         if pca:
                             hat_y = ctl.get("HAT_Y", 0)
-                            if hat_y:
-                                current_deg_0 = max(60, min(120, current_deg_0 + 5*hat_y))
+                            if hat_y != 0:
+                                current_deg_0 = max(60, min(120, current_deg_0 + (5 * hat_y)))
                                 servo0.set_angle(current_deg_0)
-                                print(f"LOG: Servo0 {current_deg_0}")
-                            hat_x = ctl.get("HAT_X", 0)
-                            if hat_x:
-                                current_deg_1 = max(0, min(180, current_deg_1 - 10*hat_x))
-                                servo1.set_angle(current_deg_1)
-                            if ctl.get("BUTTON_Y") or ctl.get("BUTTON_B"): current_deg_2 += 5
-                            if ctl.get("BUTTON_A") or ctl.get("BUTTON_X"): current_deg_2 -= 5
-                            current_deg_2 = max(60, min(130, current_deg_2))
-                            if servo2.current_angle != current_deg_2:
-                                servo2.set_angle(current_deg_2)
-                                print(f"LOG: Servo2 {current_deg_2}")
 
-                        # 緊急停止
+                            hat_x = ctl.get("HAT_X", 0)
+                            if hat_x != 0:
+                                current_deg_1 = max(0, min(180, current_deg_1 - (10 * hat_x)))
+                                servo1.set_angle(current_deg_1)
+
+                            if ctl.get("BUTTON_Y"): current_deg_2 += 5
+                            if ctl.get("BUTTON_A"): current_deg_2 -= 5
+                            if ctl.get("BUTTON_X"): current_deg_2 -= 5
+                            if ctl.get("BUTTON_B"): current_deg_2 += 5
+                            if ctl.get("BUTTON_Y") or ctl.get("BUTTON_A") or ctl.get("BUTTON_X") or ctl.get("BUTTON_B"):
+                                current_deg_2 = max(60, min(130, current_deg_2))
+                                servo2.set_angle(current_deg_2)
+
+                        # 緊急停止 (手動モード中)
                         if ctl.get("LS_PRESS") or ctl.get("RS_PRESS"):
-                            motor_left.stop(); motor_right.stop()
-                            motor_deploy.stop(); motor_right_aux.stop()
-                            motor_blade.stop(); led_main.off()
-                            print("LOG: *** EMERGENCY STOP ***")
+                            motor_left.stop()
+                            motor_right.stop()
+                            motor_left_aux.stop()
+                            motor_right_aux.stop()
+                            motor_extra.stop() # 追加モーターも停止
 
                 except Exception as e:
-                    print(f"Loop Error: {e}")
+                    print(f"Error: {e}")
                     break
-
-        print("[!] 切断")
-        motor_left.stop(); motor_right.stop()
-        motor_deploy.stop(); motor_right_aux.stop()
-        motor_blade.stop(); led_main.off()
+        
+        motor_left.stop()
+        motor_right.stop()
+        motor_left_aux.stop()
+        motor_right_aux.stop()
+        motor_extra.stop() # 追加モーターも停止
+        cb_deploy.cancel()
+        cb_store.cancel()
 
 if __name__ == "__main__":
     pi = pigpio.pi()
     if not pi.connected: exit()
+
     try:
         video_thread = threading.Thread(target=send_video)
         video_thread.daemon = True
