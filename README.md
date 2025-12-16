@@ -234,7 +234,7 @@ raspdev2を作成
 
 ## ラズパイの起動と疎通確認
 
-## [Raspberry Pi 側操作](#RaspberryPi側操作)
+## [Raspberry Pi 側操作]
 
 ## [Windows 側操作]
 
