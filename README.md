@@ -84,7 +84,7 @@ cd Maizuru_Akebono2
 ### 2. Python環境の構築とライブラリのインストール
 #### Pythonの準備
 Python 3.10以上がインストールされていることを確認してください。  
-**[Caution]**PythonはVersion 3.12.6が最も安定して動作します。
+**Caution**PythonはVersion 3.12.6が最も安定して動作します。  
 [Python3.12.6](https://www.python.org/downloads/release/python-3126/)
 
 #### 仮想環境の構築
@@ -120,6 +120,79 @@ pip install -r requirements.txt
 参考サイト  
 [最新のRaspberry PI OS (bookworm) にVNC接続を行う方法](https://qiita.com/ktamido/items/82ed2f5bd324d4721096)
 
+#### IPアドレスの固定化
+参考サイト  
+[【令和最新版】Raspberry Pi を直接WindowsにLanケーブルで接続する際のヘッドレスセットアップ手順](https://zenn.dev/nitic_students/articles/c2228293b4f437)  
+
+#### [以下に本環境における実行手順を示します(一部不要な点はスキップしています)
+Step1.LANケーブルをRaspberryPiとWindowsに直結させる
+Step2.microSDを本体に挿入して起動する
+Step3.WindowsからPingを飛ばす
+**rasp1の場合**
+```bash
+ping rasp1
+```
+**rasp2の場合**
+```bash
+ping rasp2
+```
+**どちらの機体においても実行可能なコード**
+```bash
+ping 192.168.50.20
+```
+Step4.WindowsからPingを飛ばす
+```bash
+ssh hairobo@rasp1
+```
+Step5.WindowsでIPを固定する
+**Windows + R**で[ファイル名を指定して実行]を起動
+```
+ncpa.cpl
+```
+を実行.
+- イーサネットを選択しプロパティ(画像ではWiFi)
+- IPv4のプロパティを開く
+- 任意のIPを割り当て、固定する
+-- DNSサーバは空欄
+-- IPアドレス: 192.168.50.10
+-- サブネットマスク: 255.255.255.0
+-- デフォルトゲートウェイ: 空欄
+-- DNSサーバー: 空欄
+Step6.WindowsのRunからservices.mscを実行する
+詳細は以下サイトを参照してください
+[【令和最新版】Raspberry Pi を直接WindowsにLanケーブルで接続する際のヘッドレスセットアップ手順](https://zenn.dev/nitic_students/articles/c2228293b4f437)  
+**Windows + R**で[ファイル名を指定して実行]を起動
+```
+services.msc
+```
+Routing and Remote Accessを有効化
+インターネット接続の共有を設定
+詳細は以下サイトを参照してください
+[【令和最新版】Raspberry Pi を直接WindowsにLanケーブルで接続する際のヘッドレスセットアップ手順](https://zenn.dev/nitic_students/articles/c2228293b4f437)  
+**Windows + R**で[ファイル名を指定して実行]を起動
+```
+ncpa.cpl
+```
+#### Last Steps
+1.SSH接続を試行
+**rasp1(Main)の場合**
+```bash
+ssh hairobo@rasp1
+```
+**rasp2(Sub)の場合**
+```bash
+ssh hairobo@rasp2
+```
+リモートデスクトップ(VNC)を起動
+左上の[File]>[New connection...]をクリック
+VNC server:rasp1 or rasp2
+Name:rasp1 or rasp2(任意で可)
+で設定。
+生成されたrasp1 or rasp2 (任意で設定した名前)をクリック
+ユーザーネーム(User name):hairobo
+パスワード(pass word);hairobo
+で決定
+**→接続が可能となる。**
 
 これで、Windows環境での基本的なセットアップは完了です。
 ## コントローラー操作
@@ -232,10 +305,33 @@ raspdev2を作成
 
 ## カメラ動作
 
-## ラズパイの起動と疎通確認
+# [実際実行手順実]
 
+## ラズパイの起動と疎通確認
+1.ラズパイに電源投入
+**Caution**"先にSDカードを入れてください"
+2.コマンドプロンプトで以下を入力
+```bash
+ping 192.168.50.20
+```
+返答があったらok
+3.SSH接続できるかのチェック
+```bash
+ssh hairobo@rasp1
+```
+接続できたらok
 ## [Raspberry Pi 側操作]
+```
+1.デスクトップ左上から、[プログラミング]>[Thony]をクリック
+loadから、  
+- rasp1の場合[cam.py]を起動
+- rasp2の場合[main.py]を起動
+2.プログラムを[RUN]したのち、ログに接続が出てくることを確認  
+**Caution** Waningと出ますが、**正常動作です**
 
 ## [Windows 側操作]
+**rasp1の場合**
+[pc_client.py]を実行
 
-## [実際実行手順実]
+**rasp2の場合**
+[ras2_pc_client.py]を実行
