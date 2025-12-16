@@ -84,7 +84,7 @@ cd Maizuru_Akebono2
 
 ### 2. Python環境の構築とライブラリのインストール
 #### Pythonの準備
-Python 3.10以上がインストールされていることを確認してください。
+Python 3.10以上がインストールされていることを確認してください。  
 **[Caution]**PythonはVersion 3.12.6が最も安定して動作します。
 [Python3.12.6](https://www.python.org/downloads/release/python-3126/)
 
