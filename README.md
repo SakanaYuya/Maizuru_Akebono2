@@ -25,7 +25,7 @@
 > 坂田 雄哉　**[PG (Repository Host)]**
 
 ## Commit Rules
-コミットメッセージの初めには必ず prefix をつける様にしましょう．
+コミットメッセージの初めには必ず prefix をつける様にしましょう.  
 [参考：僕が考える最強のコミットメッセージの書き方(Qiita)](https://qiita.com/konatsu_p/items/dfe199ebe3a7d2010b3e)
 
 | Prefix   | 意味                                                    |
