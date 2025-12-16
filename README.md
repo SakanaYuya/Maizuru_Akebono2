@@ -121,7 +121,7 @@ pip install -r requirements.txt
 参考サイト  
 [最新のRaspberry PI OS (bookworm) にVNC接続を行う方法](https://qiita.com/ktamido/items/82ed2f5bd324d4721096)
 
-#### IPアドレスの固定化
+#### 3.IPアドレスの固定化
 参考サイト  
 [【令和最新版】Raspberry Pi を直接WindowsにLanケーブルで接続する際のヘッドレスセットアップ手順](https://zenn.dev/nitic_students/articles/c2228293b4f437)  
 
