@@ -145,46 +145,46 @@ Step4.WindowsからPingを飛ばす
 ```bash
 ssh hairobo@rasp1
 ```
-Step5.WindowsでIPを固定する
+Step5.WindowsでIPを固定する  
 **Windows + R**で[ファイル名を指定して実行]を起動
 ```
 ncpa.cpl
 ```
-を実行.
-- イーサネットを選択しプロパティ(画像ではWiFi)
-- IPv4のプロパティを開く
-- 任意のIPを割り当て、固定する
--- DNSサーバは空欄
--- IPアドレス: 192.168.50.10
--- サブネットマスク: 255.255.255.0
--- デフォルトゲートウェイ: 空欄
--- DNSサーバー: 空欄
-Step6.WindowsのRunからservices.mscを実行する
-詳細は以下サイトを参照してください
+を実行.  
+- イーサネットを選択しプロパティ  
+- IPv4のプロパティを開く  
+- 任意のIPを割り当て、固定する  
+-- DNSサーバは空欄  
+-- IPアドレス: 192.168.50.10  
+-- サブネットマスク: 255.255.255.0  
+-- デフォルトゲートウェイ: 空欄   
+-- DNSサーバー: 空欄  
+Step6.WindowsのRunからservices.mscを実行する    
+詳細は以下サイトを参照してください  
 [【令和最新版】Raspberry Pi を直接WindowsにLanケーブルで接続する際のヘッドレスセットアップ手順](https://zenn.dev/nitic_students/articles/c2228293b4f437)  
 **Windows + R**で[ファイル名を指定して実行]を起動
 ```
 services.msc
 ```
-Routing and Remote Accessを有効化
-インターネット接続の共有を設定
-詳細は以下サイトを参照してください
+Routing and Remote Accessを有効化  
+インターネット接続の共有を設定  
+詳細は以下サイトを参照してください  
 [【令和最新版】Raspberry Pi を直接WindowsにLanケーブルで接続する際のヘッドレスセットアップ手順](https://zenn.dev/nitic_students/articles/c2228293b4f437)  
 **Windows + R**で[ファイル名を指定して実行]を起動
 ```
 ncpa.cpl
 ```
 #### Last Steps
-1.SSH接続を試行
+1.SSH接続を試行  
 **rasp1(Main)の場合**
 ```bash
 ssh hairobo@rasp1
 ```
-**rasp2(Sub)の場合**
+**rasp2(Sub)の場合**  
 ```bash
 ssh hairobo@rasp2
 ```
-リモートデスクトップ(VNC)を起動
+リモートデスクトップ(VNC)を起動  
 左上の[File]>[New connection...]をクリック
 VNC server:rasp1 or rasp2
 Name:rasp1 or rasp2(任意で可)
