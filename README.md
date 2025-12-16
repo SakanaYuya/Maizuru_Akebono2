@@ -115,7 +115,7 @@ pip install -r requirements.txt
 #### Real VNC 
 ラズパイにVNC接続をするためのアプリケーション
 以下サイトより、自身の環境に合わせてダウンロード
-[Real VNC Viewer](https://www.realvnc.com/en/connect/download/viewer/?lai_vid=99GgAjyL6hbBA&lai_sr=15-19&lai_sl=l)
+[Real VNC Viewer](https://www.realvnc.com/en/connect/download/viewer/?lai_vid=99GgAjyL6hbBA&lai_sr=15-19&lai_sl=l)  
 初回実行時「log in/sign in」が聞かれるが。「with out」で使用可能なため、そちらを選択してください。
 
 参考サイト
