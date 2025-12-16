@@ -88,7 +88,6 @@ Python 3.10以上がインストールされていることを確認してくだ
 **[Caution]**PythonはVersion 3.12.6が最も安定して動作します。
 [Python3.12.6](https://www.python.org/downloads/release/python-3126/)
 
-
 #### 仮想環境の構築
 Windowsでは、システムにインストールされている他のPythonライブラリとの競合を避けるため、プロジェクトごとに仮想環境を作成することが強く推奨されます。
 
