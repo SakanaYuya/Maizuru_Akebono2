@@ -20,6 +20,8 @@
 
 > 岩本 千尋　**[Fab]**
 
+> 高岡 優　　**[PG (super supporter)]**
+
 > 坂田 雄哉　**[PG (Repository Host)]**
 
 ## Commit Rules
