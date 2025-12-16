@@ -108,7 +108,7 @@ python -m venv venv
 pip install opencv-python pygame
 ```　
 もしくは、リポジトリに含まれる`requirements.txt`ファイルを使ってインストールすることも可能です。
-[]
+**[推奨]**
 ```bash
 pip install -r requirements.txt
 ```
