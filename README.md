@@ -185,14 +185,14 @@ ssh hairobo@rasp1
 ssh hairobo@rasp2
 ```
 リモートデスクトップ(VNC)を起動  
-左上の[File]>[New connection...]をクリック
-VNC server:rasp1 or rasp2
-Name:rasp1 or rasp2(任意で可)
-で設定。
-生成されたrasp1 or rasp2 (任意で設定した名前)をクリック
-ユーザーネーム(User name):hairobo
-パスワード(pass word);hairobo
-で決定
+左上の[File]>[New connection...]をクリック  
+VNC server:rasp1 or rasp2  
+Name:rasp1 or rasp2(任意で可)  
+で設定。  
+生成されたrasp1 or rasp2 (任意で設定した名前)をクリック  
+ユーザーネーム(User name):hairobo  
+パスワード(pass word);hairobo  
+で決定  
 **→接続が可能となる。**
 
 これで、Windows環境での基本的なセットアップは完了です。
