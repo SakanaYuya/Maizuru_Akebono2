@@ -13,30 +13,29 @@ VIDEO_PORT = 5005
 MY_IP = "0.0.0.0"
 CONTROL_PORT = 5006
 
-# ==========================================
-# ★ GPIOピン設定 (BCM番号)
-# ==========================================
-PIN_PWM_LEFT = 12   
-PIN_DIR_LEFT = 20   
-PIN_PWM_RIGHT = 13  
-PIN_DIR_RIGHT = 21  
+# GPIOピン設定 (BCM番号)
+
+PIN_PWM_LEFT = 12
+PIN_DIR_LEFT = 20
+PIN_PWM_RIGHT = 13
+PIN_DIR_RIGHT = 21
 PIN_SERVO_TILT = 18 # Top
 PIN_SERVO_PAN  = 19 # Under
 
 # ==========================================
 # --- 設定 ---
-SPEED_SCALE = 0.7   
-SERVO_SPEED_TILT = 10 
-SERVO_SPEED_PAN  = 2  
+SPEED_SCALE = 0.7
+SERVO_SPEED_TILT = 10
+SERVO_SPEED_PAN  = 2
 
 PWM_FREQ = 20000
 DEADZONE = 0.15
 SERVO_MIN_PULSE = 500
 SERVO_MAX_PULSE = 2500
 
-# ★ 映像設定
+# 映像設定
 # 解像度を上げるとデータサイズが増えるため、品質(Quality)で調整します
-JPEG_QUALITY = 50 
+JPEG_QUALITY = 50
 
 SHARED_STATE = {
     "tilt": 90
@@ -80,11 +79,11 @@ class MotorController:
         self.pi.set_mode(self.pwm_pin, pigpio.OUTPUT)
         self.pi.set_mode(self.dir_pin, pigpio.OUTPUT)
         self.pi.set_PWM_frequency(self.pwm_pin, PWM_FREQ)
-        self.pi.set_PWM_range(self.pwm_pin, 1000) 
+        self.pi.set_PWM_range(self.pwm_pin, 1000)
         self.stop()
         self.current_speed = 0.0
         self.current_dir = 0
-        
+
     def set_speed(self, speed):
         if abs(speed) < DEADZONE: speed = 0.0
         if speed > 1.0: speed = 1.0
@@ -99,53 +98,53 @@ class MotorController:
         else:
             direction = self.current_dir
             duty = 0
-        
+
         if direction != self.current_dir and self.current_speed != 0:
             self.pi.set_PWM_dutycycle(self.pwm_pin, 0)
             time.sleep(0.05)
-        
+
         self.pi.write(self.dir_pin, direction)
         self.current_dir = direction
         self.pi.set_PWM_dutycycle(self.pwm_pin, duty)
         self.current_speed = speed
-        
+
     def stop(self):
         self.pi.set_PWM_dutycycle(self.pwm_pin, 0)
         self.current_speed = 0.0
 
 def send_video():
     cap = cv2.VideoCapture(0)
-    
-    # ★ 解像度変更 (320x240 -> 640x480)
+
+    # 解像度変更 (320x240 -> 640x480)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    
+
     udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     print(f"[*] 映像送信開始 (640x480) -> {PC_IP}:{VIDEO_PORT}")
-    
+
     while True:
         ret, frame = cap.read()
-        if not ret: 
+        if not ret:
             time.sleep(0.1)
             continue
-        
+
         # サーボ角度連動 自動回転ロジック
         current_tilt_for_video = SHARED_STATE["tilt"]
         if current_tilt_for_video >= 100:
             frame = cv2.rotate(frame, cv2.ROTATE_180)
-        
+
         # JPEGエンコード
         # 画質50で圧縮 (データサイズが65KBを超えると送信できません)
         _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])
-        
+
         # UDPパケットサイズ制限チェック
         if len(buffer) < 65000:
             try:
                 udp_sock.sendto(buffer, (PC_IP, VIDEO_PORT))
-            except Exception: pass 
+            except Exception: pass
         else:
             # サイズオーバー時はログを一応出す（頻発するなら画質を下げる）
-            # print("Frame too large to send") 
+            # print("Frame too large to send")
             pass
 
         time.sleep(0.03)
@@ -175,7 +174,7 @@ def receive_control(pi):
     tcp_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     tcp_server.bind((MY_IP, CONTROL_PORT))
     tcp_server.listen(1)
-    
+
     current_tilt = init_tilt_angle
     current_pan = init_pan_angle
 
@@ -184,20 +183,20 @@ def receive_control(pi):
     while True:
         conn, addr = tcp_server.accept()
         print(f"[*] 接続: {addr}")
-        
+
         with conn:
             last_received_data = None
             while True:
                 try:
                     data = conn.recv(1024)
                     if not data: break
-                    
+
                     received_json_str = data.decode('utf-8').strip()
                     if not received_json_str: continue
                     try:
                         current_data = json.loads(received_json_str)
                     except json.JSONDecodeError: continue
-                    
+
                     if current_data != last_received_data:
                         last_received_data = current_data
                         ctl = current_data.get("controller", {})
@@ -206,8 +205,8 @@ def receive_control(pi):
                         raw_rs_y = ctl.get("RS_Y", 0.0)
                         val_ls = raw_ls_y * SPEED_SCALE
                         val_rs = raw_rs_y * SPEED_SCALE
-                        
-                        motor_left.set_speed(val_rs) 
+
+                        motor_left.set_speed(val_rs)
                         motor_right.set_speed(-val_ls)
 
                         # Tilt (PIN 18)
@@ -215,7 +214,7 @@ def receive_control(pi):
                         if hat_y != 0:
                             if hat_y == 1: current_tilt += SERVO_SPEED_TILT
                             elif hat_y == -1: current_tilt -= SERVO_SPEED_TILT
-                            
+
                             current_tilt = max(0, min(180, current_tilt))
                             servo_tilt.set_angle_instant(current_tilt)
                             print(f"Tilt: {current_tilt}")
@@ -226,7 +225,7 @@ def receive_control(pi):
                         if hat_x != 0:
                             if hat_x == 1: current_pan -= SERVO_SPEED_PAN
                             elif hat_x == -1: current_pan += SERVO_SPEED_PAN
-                            
+
                             current_pan = max(10, min(140, current_pan))
                             servo_pan.set_angle_instant(current_pan)
                             print(f"Pan : {current_pan}")
@@ -234,11 +233,11 @@ def receive_control(pi):
                 except Exception as e:
                     print(f"Loop Error: {e}")
                     break
-        
+
         print("[!] 切断 - 停止")
         motor_left.stop()
         motor_right.stop()
-        servo_pan.move_to_slowly(init_pan_angle) 
+        servo_pan.move_to_slowly(init_pan_angle)
         servo_tilt.move_to_slowly(init_tilt_angle)
         SHARED_STATE["tilt"] = init_tilt_angle
 
