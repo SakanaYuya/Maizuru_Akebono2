@@ -1,5 +1,5 @@
-# rasp1_RAS_ver13
-# V12.1 + アーム展開角度制限 (30度残しで展開、収納は全閉)
+# rasp1_RAS_ver13.1
+# V13 + ウィンチ回転方向反転 + アーム角度30度設定
 import cv2
 import socket
 import threading
@@ -45,8 +45,8 @@ SERVO_CH_ARM_R = 13     # 右アーム (ch D)
 ARM_MOVE_DELAY = 0.015 
 ARM_MOVE_STEP  = 2
 
-# ★ V13追加: 展開時の制限角度 (度)
-# 30度残す = 0～180の範囲のうち、0～150までしか動かない
+# ★ 展開時の制限角度 (度)
+# 45度展開
 DEPLOY_ANGLE_OFFSET = 45
 
 # --- ログ用コールバック関数 ---
@@ -170,29 +170,24 @@ def send_video():
         time.sleep(0.03)
 
 # =========================================================
-# ★ V13: 自動サーボ移動関数 (角度範囲調整版)
+# 自動サーボ移動関数 (角度範囲調整版)
 # =========================================================
 def move_arms_smooth(servo_l, servo_r, deploy, conn):
     action_name = "アーム展開" if deploy else "アーム収納"
     print(f"LOG: {action_name} 開始")
     
-    # ★ V13 ロジック変更
-    # 0 = 全開(水平など), 180 = 格納
+    # 0 = 全開, 180 = 格納
     # DEPLOY_ANGLE_OFFSET = 30 (30度手前で止める)
     
     if deploy:
-        # 展開時: 0 から (180 - OFFSET) までループさせるイメージ
-        # 実際の角度計算:
-        # L: 180 -> 30 (180-OFFSET)
-        # R: 0 -> 150 (OFFSET)
-        # ループカウンタ i は「移動量」として 0 から (180-30)=150 まで回す
+        # 展開: 0 から (180 - OFFSET) までループ
+        # L: 180 -> 30
+        # R: 0 -> 150
         start_i = 0
-        end_i = 180 - DEPLOY_ANGLE_OFFSET  # 例: 150
+        end_i = 180 - DEPLOY_ANGLE_OFFSET  # 150
     else:
-        # 収納時: 展開位置(30/150) から 格納位置(180/0) まで戻す
-        # ループカウンタ i は 30(OFFSET) から 180 まで回すことで
-        # いきなり動かず、スムーズに続きから格納できる
-        start_i = DEPLOY_ANGLE_OFFSET      # 例: 30
+        # 収納: 30(OFFSET) から 180 までループ
+        start_i = DEPLOY_ANGLE_OFFSET      # 30
         end_i = 180
 
     conn.settimeout(0.01)
@@ -215,17 +210,13 @@ def move_arms_smooth(servo_l, servo_r, deploy, conn):
             except socket.timeout: pass
             except: pass
 
-            # 角度計算 (共通ロジックで i の範囲だけ変える)
+            # 角度計算
             if deploy:
-                # 展開: i=0 -> 150
-                # L: 180 -> 30
-                # R: 0 -> 150
+                # 展開時
                 angle_l = 180 - i
                 angle_r = 0 + i
             else:
-                # 収納: i=30 -> 180
-                # L: 0 + i  (30 -> 180) ※Lは0基準で増やすと収納方向
-                # R: 180 - i (150 -> 0) ※Rは180基準で減らすと収納方向
+                # 収納時
                 angle_l = 0 + i
                 angle_r = 180 - i
             
@@ -295,15 +286,15 @@ def receive_control(pi):
         servo2 = Servo(pca, channel=6, min_angle=60, max_angle=130)
         
         servo_arm_l = Servo(pca, channel=SERVO_CH_ARM_L, min_angle=0, max_angle=180)
-        servo_arm_r = Servo(pca, channel=SERVO_CH_ARM_R, min_angle=0, max_angle=180)
+        servo_arm_r = Servo(pca, channel=SERVO_CH_ARM_R, min_angle=3, max_angle=180)
         
         servo0.set_angle(90)
         servo1.set_angle(0)
         servo2.set_angle(90)
         
-        # 初期位置: 収納 (L:180, R:0) - 変わらず
+        # 初期位置: 収納
         servo_arm_l.set_angle(180)
-        servo_arm_r.set_angle(0) # Min limit
+        servo_arm_r.set_angle(3) # Min limit
         
         current_deg_0 = 90
         current_deg_1 = 0
@@ -327,7 +318,7 @@ def receive_control(pi):
     tcp_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     tcp_server.bind((MY_IP, CONTROL_PORT))
     tcp_server.listen(1)
-    print(f"[*] V13 Ready: TCP {CONTROL_PORT}")
+    print(f"[*] V13.1 Ready: TCP {CONTROL_PORT}")
     
     while True:
         conn, addr = tcp_server.accept()
@@ -390,15 +381,18 @@ def receive_control(pi):
                         else:
                             motor_left_aux.stop()
 
+                        # --- ★ V13.1 ウィンチ方向修正 ---
                         rb_pressed = ctl.get("BUTTON_RB", False)
                         rt_val = ctl.get("TRIGGER_RT", -1.0)
                         rt_norm = (rt_val + 1.0) / 2.0
                         
                         if rb_pressed:
-                            motor_right_aux.set_speed(1.0)
+                            # RB: 逆転 (-1.0)
+                            motor_right_aux.set_speed(-1.0)
                         elif rt_norm > 0.1:
+                            # RT: 正転 (+speed)
                             speed = TRIGGER_MIN_SPEED + rt_norm * (1.0 - TRIGGER_MIN_SPEED)
-                            motor_right_aux.set_speed(-speed)
+                            motor_right_aux.set_speed(speed)
                         else:
                             motor_right_aux.stop()
                         
