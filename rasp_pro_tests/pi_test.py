@@ -1,5 +1,5 @@
-# rasp1_RAS_ver13.1
-# V13 + ウィンチ回転方向反転 + アーム角度30度設定
+# rasp1_RAS_ver14.1
+# V14 + シーケンス順序変更 (カメラ最優先)
 import cv2
 import socket
 import threading
@@ -23,7 +23,7 @@ PIN_DIR_LEFT = 20
 PIN_PWM_RIGHT = 13
 PIN_DIR_RIGHT = 21
 
-PIN_PWM_LEFT_AUX = 18   # 展開機構
+PIN_PWM_LEFT_AUX = 18   # 展開機構 (スライド用モーター)
 PIN_DIR_LEFT_AUX = 22
 
 PIN_PWM_RIGHT_AUX = 19  # ウィンチ
@@ -45,9 +45,12 @@ SERVO_CH_ARM_R = 13     # 右アーム (ch D)
 ARM_MOVE_DELAY = 0.015 
 ARM_MOVE_STEP  = 2
 
-# ★ 展開時の制限角度 (度)
-# 45度展開
-DEPLOY_ANGLE_OFFSET = 45
+# 展開時のアーム制限角度 (30度残し)
+DEPLOY_ANGLE_OFFSET = 30
+
+# カメラサーボのターゲット角度
+CAM_TARGET_0 = 60  # 上下
+CAM_TARGET_1 = 0   # 左右
 
 # --- ログ用コールバック関数 ---
 def sw_log_callback(gpio, level, tick):
@@ -116,6 +119,7 @@ class Servo:
     def set_angle(self, angle):
         count = self.angle_to_pulse(angle)
         self.pca.set_pwm(self.channel, 0, count)
+        print(f"[Log] Servo CH{self.channel} -> {angle}°")
 
 class MotorController:
     def __init__(self, pi, pwm_pin, dir_pin, name="Motor"):
@@ -170,31 +174,67 @@ def send_video():
         time.sleep(0.03)
 
 # =========================================================
-# 自動サーボ移動関数 (角度範囲調整版)
+# カメラサーボ自動移動関数
+# =========================================================
+def move_camera_smooth(servo0, servo1, start_0, start_1, conn):
+    print(f"LOG: カメラ移動開始 (現在 {start_0}, {start_1} -> 目標 {CAM_TARGET_0}, {CAM_TARGET_1})")
+    current_0 = start_0
+    current_1 = start_1
+    conn.settimeout(0.01)
+    
+    try:
+        while current_0 != CAM_TARGET_0 or current_1 != CAM_TARGET_1:
+            try:
+                data = conn.recv(1024)
+                if data:
+                    js_str = data.decode('utf-8').strip()
+                    if '}{' in js_str: js_str = '{' + js_str.split('}{')[-1]
+                    try:
+                        js = json.loads(js_str)
+                        ctl = js.get("controller", {})
+                        if ctl.get("LS_PRESS") or ctl.get("RS_PRESS"):
+                            print("LOG: ! カメラ動作中断 (緊急停止) !")
+                            return False
+                    except: pass
+            except socket.timeout: pass
+            except: pass
+
+            if current_0 < CAM_TARGET_0:
+                current_0 = min(CAM_TARGET_0, current_0 + ARM_MOVE_STEP)
+            elif current_0 > CAM_TARGET_0:
+                current_0 = max(CAM_TARGET_0, current_0 - ARM_MOVE_STEP)
+            
+            if current_1 < CAM_TARGET_1:
+                current_1 = min(CAM_TARGET_1, current_1 + ARM_MOVE_STEP)
+            elif current_1 > CAM_TARGET_1:
+                current_1 = max(CAM_TARGET_1, current_1 - ARM_MOVE_STEP)
+            
+            servo0.set_angle(current_0)
+            servo1.set_angle(current_1)
+            time.sleep(ARM_MOVE_DELAY)
+    finally:
+        conn.settimeout(None)
+    
+    print("LOG: カメラ移動完了")
+    return True
+
+# =========================================================
+# アームサーボ移動関数
 # =========================================================
 def move_arms_smooth(servo_l, servo_r, deploy, conn):
     action_name = "アーム展開" if deploy else "アーム収納"
     print(f"LOG: {action_name} 開始")
     
-    # 0 = 全開, 180 = 格納
-    # DEPLOY_ANGLE_OFFSET = 30 (30度手前で止める)
-    
     if deploy:
-        # 展開: 0 から (180 - OFFSET) までループ
-        # L: 180 -> 30
-        # R: 0 -> 150
         start_i = 0
-        end_i = 180 - DEPLOY_ANGLE_OFFSET  # 150
+        end_i = 180 - DEPLOY_ANGLE_OFFSET
     else:
-        # 収納: 30(OFFSET) から 180 までループ
-        start_i = DEPLOY_ANGLE_OFFSET      # 30
+        start_i = DEPLOY_ANGLE_OFFSET
         end_i = 180
 
     conn.settimeout(0.01)
-    
     try:
         for i in range(start_i, end_i + 1, ARM_MOVE_STEP):
-            # 緊急停止チェック
             try:
                 data = conn.recv(1024)
                 if data:
@@ -210,20 +250,16 @@ def move_arms_smooth(servo_l, servo_r, deploy, conn):
             except socket.timeout: pass
             except: pass
 
-            # 角度計算
             if deploy:
-                # 展開時
                 angle_l = 180 - i
                 angle_r = 0 + i
             else:
-                # 収納時
                 angle_l = 0 + i
                 angle_r = 180 - i
             
             servo_l.set_angle(angle_l)
             servo_r.set_angle(angle_r)
             time.sleep(ARM_MOVE_DELAY)
-            
     finally:
         conn.settimeout(None)
     
@@ -231,10 +267,10 @@ def move_arms_smooth(servo_l, servo_r, deploy, conn):
     return True
 
 # =========================================================
-# 自動シーケンス関数 (モーター移動)
+# モーター(スライド機構)移動関数
 # =========================================================
 def run_motor_sequence(pi, motor, target_pin, speed, conn, seq_name):
-    print(f"LOG: モーター移動開始 [{seq_name}] -> 目標GPIO {target_pin}")
+    print(f"LOG: 展開機構モーター移動開始 [{seq_name}] -> 目標GPIO {target_pin}")
     conn.settimeout(0.02) 
     success = True
     try:
@@ -278,7 +314,6 @@ def receive_control(pi):
     cb_store = pi.callback(PIN_SW_STORE, pigpio.EITHER_EDGE, sw_log_callback)
     print("[*] SW Log Callbacks Registered")
 
-    # サーボ初期化
     try:
         pca = PCA9685(pi)
         servo0 = Servo(pca, channel=4, min_angle=60, max_angle=120)
@@ -292,14 +327,13 @@ def receive_control(pi):
         servo1.set_angle(0)
         servo2.set_angle(90)
         
-        # 初期位置: 収納
         servo_arm_l.set_angle(180)
-        servo_arm_r.set_angle(3) # Min limit
+        servo_arm_r.set_angle(3)
         
         current_deg_0 = 90
         current_deg_1 = 0
         current_deg_2 = 90
-        print(f"[*] Servo Init OK: Arms on CH {SERVO_CH_ARM_L}(C), {SERVO_CH_ARM_R}(D)")
+        print(f"[*] Servo Init OK")
     except Exception as e: 
         print(f"[!] Servo Init Error: {e}")
         pca = None
@@ -307,18 +341,16 @@ def receive_control(pi):
     try:
         motor_left = MotorController(pi, PIN_PWM_LEFT, PIN_DIR_LEFT, "左")
         motor_right = MotorController(pi, PIN_PWM_RIGHT, PIN_DIR_RIGHT, "右")
-        motor_left_aux = MotorController(pi, PIN_PWM_LEFT_AUX, PIN_DIR_LEFT_AUX, "展開")
+        motor_left_aux = MotorController(pi, PIN_PWM_LEFT_AUX, PIN_DIR_LEFT_AUX, "展開機構")
         motor_right_aux = MotorController(pi, PIN_PWM_RIGHT_AUX, PIN_DIR_RIGHT_AUX, "ウィンチ")
-        
         motor_extra = MotorController(pi, PIN_PWM_EXTRA, PIN_DIR_EXTRA, "追加モーター")
-        print("[*] Extra Motor Init OK (GPIO 24/25)")
-        
+        print("[*] All Motors Init OK")
     except Exception: return
 
     tcp_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     tcp_server.bind((MY_IP, CONTROL_PORT))
     tcp_server.listen(1)
-    print(f"[*] V13.1 Ready: TCP {CONTROL_PORT}")
+    print(f"[*] V14.1 Ready: TCP {CONTROL_PORT}")
     
     while True:
         conn, addr = tcp_server.accept()
@@ -347,31 +379,47 @@ def receive_control(pi):
                         lt_val = ctl.get("TRIGGER_LT", -1.0)
                         lt_norm = (lt_val + 1.0) / 2.0
                         
+                        # --- 展開 (Deploy) ---
                         if lt_norm > 0.5:
-                            # 展開: 移動 -> アーム展開(150まで) -> 追加モーターON
-                            if run_motor_sequence(pi, motor_left_aux, PIN_SW_DEPLOY, 1.0, conn, "展開移動"):
-                                if pca: 
-                                    if move_arms_smooth(servo_arm_l, servo_arm_r, deploy=True, conn=conn):
-                                        print("LOG: 展開完了 -> 追加モーター回転開始")
-                                        motor_extra.set_speed(-1.0) # DIR=0
+                            if pca:
+                                # 1. ★カメラ移動 (最優先)
+                                if move_camera_smooth(servo0, servo1, current_deg_0, current_deg_1, conn):
+                                    current_deg_0 = CAM_TARGET_0
+                                    current_deg_1 = CAM_TARGET_1
+                                    
+                                    # 2. 展開機構モーター移動 (前進)
+                                    if run_motor_sequence(pi, motor_left_aux, PIN_SW_DEPLOY, 1.0, conn, "展開移動"):
+                                        # 3. アームサーボ展開
+                                        if move_arms_smooth(servo_arm_l, servo_arm_r, deploy=True, conn=conn):
+                                            # 4. 追加モーターON
+                                            print("LOG: 展開完了 -> 追加モーター回転開始")
+                                            motor_extra.set_speed(-1.0)
 
                             last_received_data = None
                             continue
 
+                        # --- 収納 (Store) ---
                         if ctl.get("BUTTON_LB", False):
-                            # 収納: 追加モーターOFF -> アーム収納(30から180まで) -> 移動
                             print("LOG: 収納開始 -> 追加モーター停止")
+                            # 1. 追加モーターOFF
                             motor_extra.stop()
 
-                            if pca: 
-                                if move_arms_smooth(servo_arm_l, servo_arm_r, deploy=False, conn=conn):
-                                    time.sleep(0.5) 
-                                    run_motor_sequence(pi, motor_left_aux, PIN_SW_STORE, -1.0, conn, "収納移動")
+                            if pca:
+                                # 2. ★カメラ移動 (最優先)
+                                if move_camera_smooth(servo0, servo1, current_deg_0, current_deg_1, conn):
+                                    current_deg_0 = CAM_TARGET_0
+                                    current_deg_1 = CAM_TARGET_1
+
+                                    # 3. アームサーボ収納
+                                    if move_arms_smooth(servo_arm_l, servo_arm_r, deploy=False, conn=conn):
+                                        time.sleep(0.5) 
+                                        # 4. 展開機構モーター移動 (後退)
+                                        run_motor_sequence(pi, motor_left_aux, PIN_SW_STORE, -1.0, conn, "収納移動")
                             
                             last_received_data = None
                             continue
 
-                        # 手動制御
+                        # 通常手動制御
                         motor_left.set_speed(-ctl.get("LS_Y", 0.0))
                         motor_right.set_speed(-ctl.get("RS_Y", 0.0))
 
@@ -381,16 +429,13 @@ def receive_control(pi):
                         else:
                             motor_left_aux.stop()
 
-                        # --- ★ V13.1 ウィンチ方向修正 ---
                         rb_pressed = ctl.get("BUTTON_RB", False)
                         rt_val = ctl.get("TRIGGER_RT", -1.0)
                         rt_norm = (rt_val + 1.0) / 2.0
                         
                         if rb_pressed:
-                            # RB: 逆転 (-1.0)
                             motor_right_aux.set_speed(-1.0)
                         elif rt_norm > 0.1:
-                            # RT: 正転 (+speed)
                             speed = TRIGGER_MIN_SPEED + rt_norm * (1.0 - TRIGGER_MIN_SPEED)
                             motor_right_aux.set_speed(speed)
                         else:
