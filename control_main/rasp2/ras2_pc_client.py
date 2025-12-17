@@ -26,7 +26,7 @@ def receive_video():
     udp_sock.settimeout(1.0)
     udp_sock.bind((MY_IP, VIDEO_PORT))
     print(f"[*] 映像待機中: UDP {VIDEO_PORT}")
-s
+    
     while is_running:
         try:
             data, addr = udp_sock.recvfrom(65535)
