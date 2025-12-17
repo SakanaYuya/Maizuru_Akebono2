@@ -227,7 +227,11 @@ def receive_control(pi):
                             if hat_x == 1: current_pan -= SERVO_SPEED_PAN
                             elif hat_x == -1: current_pan += SERVO_SPEED_PAN
                             
+<<<<<<< HEAD
                             current_pan = max(10, min(140, current_pan))
+=======
+                            current_pan = max(35, min(180, current_pan))
+>>>>>>> dbe122b167bdfc5ac6ac6208e6fa6c70847bd464
                             servo_pan.set_angle_instant(current_pan)
                             print(f"Pan : {current_pan}")
 

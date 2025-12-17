@@ -1,5 +1,5 @@
-# rasp1_RAS_ver12
-# V11.1 + 追加モーター (GPIO24/25: 展開後ON/収納時OFF)
+# rasp1_RAS_ver13.1
+# V13 + ウィンチ回転方向反転 + アーム角度30度設定
 import cv2
 import socket
 import threading
@@ -29,7 +29,7 @@ PIN_DIR_LEFT_AUX = 22
 PIN_PWM_RIGHT_AUX = 19  # ウィンチ
 PIN_DIR_RIGHT_AUX = 23
 
-# ★ V12 追加モーター (回転機構など)
+# 追加モーター (回転機構)
 PIN_PWM_EXTRA = 24
 PIN_DIR_EXTRA = 25
 
@@ -44,6 +44,10 @@ SERVO_CH_ARM_R = 13     # 右アーム (ch D)
 # サーボ動作速度設定
 ARM_MOVE_DELAY = 0.015 
 ARM_MOVE_STEP  = 2
+
+# ★ 展開時の制限角度 (度)
+# 45度展開
+DEPLOY_ANGLE_OFFSET = 45
 
 # --- ログ用コールバック関数 ---
 def sw_log_callback(gpio, level, tick):
@@ -166,16 +170,30 @@ def send_video():
         time.sleep(0.03)
 
 # =========================================================
-# 自動サーボ移動関数
+# 自動サーボ移動関数 (角度範囲調整版)
 # =========================================================
 def move_arms_smooth(servo_l, servo_r, deploy, conn):
     action_name = "アーム展開" if deploy else "アーム収納"
     print(f"LOG: {action_name} 開始")
-    start_deg = 0
-    end_deg = 180
+    
+    # 0 = 全開, 180 = 格納
+    # DEPLOY_ANGLE_OFFSET = 30 (30度手前で止める)
+    
+    if deploy:
+        # 展開: 0 から (180 - OFFSET) までループ
+        # L: 180 -> 30
+        # R: 0 -> 150
+        start_i = 0
+        end_i = 180 - DEPLOY_ANGLE_OFFSET  # 150
+    else:
+        # 収納: 30(OFFSET) から 180 までループ
+        start_i = DEPLOY_ANGLE_OFFSET      # 30
+        end_i = 180
+
     conn.settimeout(0.01)
+    
     try:
-        for i in range(start_deg, end_deg + 1, ARM_MOVE_STEP):
+        for i in range(start_i, end_i + 1, ARM_MOVE_STEP):
             # 緊急停止チェック
             try:
                 data = conn.recv(1024)
@@ -192,16 +210,20 @@ def move_arms_smooth(servo_l, servo_r, deploy, conn):
             except socket.timeout: pass
             except: pass
 
+            # 角度計算
             if deploy:
+                # 展開時
                 angle_l = 180 - i
                 angle_r = 0 + i
             else:
+                # 収納時
                 angle_l = 0 + i
                 angle_r = 180 - i
             
             servo_l.set_angle(angle_l)
             servo_r.set_angle(angle_r)
             time.sleep(ARM_MOVE_DELAY)
+            
     finally:
         conn.settimeout(None)
     
@@ -247,7 +269,6 @@ def run_motor_sequence(pi, motor, target_pin, speed, conn, seq_name):
 
 # --- 操作受信 & 制御処理 ---
 def receive_control(pi):
-    # GPIO設定
     pi.set_mode(PIN_SW_DEPLOY, pigpio.INPUT)
     pi.set_pull_up_down(PIN_SW_DEPLOY, pigpio.PUD_UP)
     pi.set_mode(PIN_SW_STORE, pigpio.INPUT)
@@ -265,14 +286,15 @@ def receive_control(pi):
         servo2 = Servo(pca, channel=6, min_angle=60, max_angle=130)
         
         servo_arm_l = Servo(pca, channel=SERVO_CH_ARM_L, min_angle=0, max_angle=180)
-        servo_arm_r = Servo(pca, channel=SERVO_CH_ARM_R, min_angle=0, max_angle=180)
+        servo_arm_r = Servo(pca, channel=SERVO_CH_ARM_R, min_angle=3, max_angle=180)
         
         servo0.set_angle(90)
         servo1.set_angle(0)
         servo2.set_angle(90)
+        
         # 初期位置: 収納
         servo_arm_l.set_angle(180)
-        servo_arm_r.set_angle(0)
+        servo_arm_r.set_angle(3) # Min limit
         
         current_deg_0 = 90
         current_deg_1 = 0
@@ -282,14 +304,12 @@ def receive_control(pi):
         print(f"[!] Servo Init Error: {e}")
         pca = None
     
-    # モーター初期化
     try:
         motor_left = MotorController(pi, PIN_PWM_LEFT, PIN_DIR_LEFT, "左")
         motor_right = MotorController(pi, PIN_PWM_RIGHT, PIN_DIR_RIGHT, "右")
         motor_left_aux = MotorController(pi, PIN_PWM_LEFT_AUX, PIN_DIR_LEFT_AUX, "展開")
         motor_right_aux = MotorController(pi, PIN_PWM_RIGHT_AUX, PIN_DIR_RIGHT_AUX, "ウィンチ")
         
-        # ★ V12 追加モーター
         motor_extra = MotorController(pi, PIN_PWM_EXTRA, PIN_DIR_EXTRA, "追加モーター")
         print("[*] Extra Motor Init OK (GPIO 24/25)")
         
@@ -298,7 +318,7 @@ def receive_control(pi):
     tcp_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     tcp_server.bind((MY_IP, CONTROL_PORT))
     tcp_server.listen(1)
-    print(f"[*] V12 Ready: TCP {CONTROL_PORT}")
+    print(f"[*] V13.1 Ready: TCP {CONTROL_PORT}")
     
     while True:
         conn, addr = tcp_server.accept()
@@ -323,38 +343,29 @@ def receive_control(pi):
                         last_received_data = current_data
                         ctl = current_data.get("controller", {})
 
-                        # =========================================
-                        # ★ V12 自動展開/収納シーケンス
-                        # =========================================
-                        
-                        # --- 展開 (LT > 50%) ---
+                        # 自動シーケンス
                         lt_val = ctl.get("TRIGGER_LT", -1.0)
                         lt_norm = (lt_val + 1.0) / 2.0
                         
                         if lt_norm > 0.5:
-                            # 1. モーター移動 (展開位置へ)
+                            # 展開: 移動 -> アーム展開(150まで) -> 追加モーターON
                             if run_motor_sequence(pi, motor_left_aux, PIN_SW_DEPLOY, 1.0, conn, "展開移動"):
-                                # 2. アーム展開 (L:180->0)
                                 if pca: 
                                     if move_arms_smooth(servo_arm_l, servo_arm_r, deploy=True, conn=conn):
-                                        # ★ 3. 追加モーター回転開始 (DIR=0, Speed=1.0)
                                         print("LOG: 展開完了 -> 追加モーター回転開始")
-                                        motor_extra.set_speed(-1.0) # DIR=1になるが、ひとまず1.0で回転
+                                        motor_extra.set_speed(-1.0) # DIR=0
 
                             last_received_data = None
                             continue
 
-                        # --- 収納 (LB ボタン) ---
                         if ctl.get("BUTTON_LB", False):
-                            # ★ 0. 追加モーター停止 (最優先)
+                            # 収納: 追加モーターOFF -> アーム収納(30から180まで) -> 移動
                             print("LOG: 収納開始 -> 追加モーター停止")
                             motor_extra.stop()
 
-                            # 1. アーム収納 (L:0->180)
                             if pca: 
                                 if move_arms_smooth(servo_arm_l, servo_arm_r, deploy=False, conn=conn):
                                     time.sleep(0.5) 
-                                    # 2. モーター移動 (収納位置へ)
                                     run_motor_sequence(pi, motor_left_aux, PIN_SW_STORE, -1.0, conn, "収納移動")
                             
                             last_received_data = None
@@ -370,15 +381,18 @@ def receive_control(pi):
                         else:
                             motor_left_aux.stop()
 
+                        # --- ★ V13.1 ウィンチ方向修正 ---
                         rb_pressed = ctl.get("BUTTON_RB", False)
                         rt_val = ctl.get("TRIGGER_RT", -1.0)
                         rt_norm = (rt_val + 1.0) / 2.0
                         
                         if rb_pressed:
-                            motor_right_aux.set_speed(1.0)
+                            # RB: 逆転 (-1.0)
+                            motor_right_aux.set_speed(-1.0)
                         elif rt_norm > 0.1:
+                            # RT: 正転 (+speed)
                             speed = TRIGGER_MIN_SPEED + rt_norm * (1.0 - TRIGGER_MIN_SPEED)
-                            motor_right_aux.set_speed(-speed)
+                            motor_right_aux.set_speed(speed)
                         else:
                             motor_right_aux.stop()
                         
@@ -401,13 +415,12 @@ def receive_control(pi):
                                 current_deg_2 = max(60, min(130, current_deg_2))
                                 servo2.set_angle(current_deg_2)
 
-                        # 緊急停止 (手動モード中)
                         if ctl.get("LS_PRESS") or ctl.get("RS_PRESS"):
                             motor_left.stop()
                             motor_right.stop()
                             motor_left_aux.stop()
                             motor_right_aux.stop()
-                            motor_extra.stop() # 追加モーターも停止
+                            motor_extra.stop()
 
                 except Exception as e:
                     print(f"Error: {e}")
@@ -417,7 +430,7 @@ def receive_control(pi):
         motor_right.stop()
         motor_left_aux.stop()
         motor_right_aux.stop()
-        motor_extra.stop() # 追加モーターも停止
+        motor_extra.stop()
         cb_deploy.cancel()
         cb_store.cancel()
 
