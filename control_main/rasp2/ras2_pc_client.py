@@ -1,4 +1,5 @@
-#rasp2_pc_console_V2
+#rasp2_pc_console_V2.1
+#Window_Resizable
 import cv2
 import socket
 import numpy as np
@@ -18,6 +19,7 @@ VIDEO_ROTATION = 270
 # グローバル変数
 is_running = True
 last_sent_json = ""
+WINDOW_NAME = "Camera View (Press Q in Control Window to Quit)"
 
 # --- UDP受信 (映像) ---
 def receive_video():
@@ -26,6 +28,9 @@ def receive_video():
     udp_sock.settimeout(1.0)
     udp_sock.bind((MY_IP, VIDEO_PORT))
     print(f"[*] 映像待機中: UDP {VIDEO_PORT}")
+    
+    # ★変更点: ウィンドウをリサイズ可能に設定
+    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
     
     while is_running:
         try:
@@ -41,8 +46,7 @@ def receive_video():
                 elif VIDEO_ROTATION == 270:
                     frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
                 
-                # ウィンドウ名も修正
-                cv2.imshow("Camera View (Press Q in Control Window to Quit)", frame)
+                cv2.imshow(WINDOW_NAME, frame)
                 
             cv2.waitKey(1)
         except socket.timeout:
@@ -59,8 +63,10 @@ def main():
 
     # 1. Pygame初期化
     pygame.init()
-    # フォーカス用の小さなウィンドウを作成
-    screen = pygame.display.set_mode((400, 150)) # 縦を少し広げて情報を追加
+    
+    # ★変更点: pygame.RESIZABLE を追加してウィンドウサイズ変更を許可
+    screen = pygame.display.set_mode((400, 150), pygame.RESIZABLE)
+    
     pygame.display.set_caption("Control Panel (Click Here to Control)")
     font = pygame.font.SysFont(None, 24)
 
@@ -74,11 +80,11 @@ def main():
         # コンソールヘルプメッセージ
         print("------------------------------------------------")
         print("【重要】操作するには「Control Panel」ウィンドウを")
-        print("       クリックしてフォーカスしてください。")
+        print("       クリックしてフォーカスしてください。")
         print("------------------------------------------------")
         print(" [W/S]: 左車輪 (前後), [O/L]: 右車輪 (前後)")
         print(" [3/4]: カメラ上下, [8/9]: カメラ左右")
-        print(" [Q]  : 終了")
+        print(" [Q]  : 終了")
         print("------------------------------------------------")
     except Exception as e:
         print(f"[!] 接続失敗: {e}")
@@ -92,6 +98,11 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 is_running = False
+            
+            # ★変更点: ウィンドウサイズ変更イベントの処理
+            elif event.type == pygame.VIDEORESIZE:
+                # 新しいサイズでスクリーンを再設定
+                screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
 
         # 画面描画 (ユーザーへの指示)
         screen.fill((0, 0, 0))
