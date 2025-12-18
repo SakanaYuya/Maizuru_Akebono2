@@ -1,264 +1,221 @@
-#rasp2_gpio_servo_v10
-#Simple_LED_Trigger
+#rasp2_pc_console_V2.1
+#Window_Resizable
 import cv2
 import socket
+import numpy as np
 import threading
+import pygame
 import time
 import json
-import pigpio
+import sys
 
-# --- 通信設定 ---
-PC_IP = "192.168.50.10"
-VIDEO_PORT = 5005
-MY_IP = "0.0.0.0"
-CONTROL_PORT = 5006
-
-# ==========================================
-# ★ GPIOピン設定 (BCM番号)
-# ==========================================
-PIN_PWM_LEFT = 12   
-PIN_DIR_LEFT = 20   
-PIN_PWM_RIGHT = 13  
-PIN_DIR_RIGHT = 21  
-PIN_SERVO_TILT = 18 # Top
-PIN_SERVO_PAN  = 19 # Under
-# to 北条　ぼんぼりの高さの調整は229行目で行います。
-# ★ LEDテープ (単なるHigh/Low制御)
-PIN_LED_TAPE = 14
-
-# ==========================================
 # --- 設定 ---
-SPEED_SCALE = 0.7   
-SERVO_SPEED_TILT = 10 
-SERVO_SPEED_PAN  = 8
+MY_IP = "0.0.0.0" 
+VIDEO_PORT = 5005
+RPI_IP = "192.168.50.20"
+CONTROL_PORT = 5006
+VIDEO_ROTATION = 270 
 
-PWM_FREQ = 20000
-DEADZONE = 0.15
-SERVO_MIN_PULSE = 500
-SERVO_MAX_PULSE = 2500
+# グローバル変数
+is_running = True
+last_sent_json = ""
+WINDOW_NAME = "Camera View (Press Q in Control Window to Quit)"
 
-JPEG_QUALITY = 50 
-
-SHARED_STATE = {
-    "tilt": 90
-}
-
-class DirectServo:
-    def __init__(self, pi, pin, init_angle=0):
-        self.pi = pi
-        self.pin = pin
-        self.current_angle = init_angle
-        self.pi.set_mode(self.pin, pigpio.OUTPUT)
-        self.set_angle_instant(init_angle)
-
-    def set_angle_instant(self, angle):
-        if angle < 0: angle = 0
-        if angle > 180: angle = 180
-        pulse_width = SERVO_MIN_PULSE + (angle / 180.0) * (SERVO_MAX_PULSE - SERVO_MIN_PULSE)
-        self.pi.set_servo_pulsewidth(self.pin, pulse_width)
-        self.current_angle = angle
-
-    def move_to_slowly(self, target_angle, delay=0.01, step=1):
-        if target_angle < 0: target_angle = 0
-        if target_angle > 180: target_angle = 180
-        start = int(self.current_angle)
-        end = int(target_angle)
-        step_val = step if start < end else -step
-        if start != end:
-            for angle in range(start, end, step_val):
-                self.set_angle_instant(angle)
-                time.sleep(delay)
-        self.set_angle_instant(end)
-
-    def stop(self):
-        self.pi.set_servo_pulsewidth(self.pin, 0)
-
-class MotorController:
-    def __init__(self, pi, pwm_pin, dir_pin):
-        self.pi = pi
-        self.pwm_pin = pwm_pin
-        self.dir_pin = dir_pin
-        self.pi.set_mode(self.pwm_pin, pigpio.OUTPUT)
-        self.pi.set_mode(self.dir_pin, pigpio.OUTPUT)
-        self.pi.set_PWM_frequency(self.pwm_pin, PWM_FREQ)
-        self.pi.set_PWM_range(self.pwm_pin, 1000) 
-        self.stop()
-        self.current_speed = 0.0
-        self.current_dir = 0
-        
-    def set_speed(self, speed):
-        if abs(speed) < DEADZONE: speed = 0.0
-        if speed > 1.0: speed = 1.0
-        if speed < -1.0: speed = -1.0
-
-        if speed > 0:
-            direction = 1
-            duty = int(abs(speed) * 1000)
-        elif speed < 0:
-            direction = 0
-            duty = int(abs(speed) * 1000)
-        else:
-            direction = self.current_dir
-            duty = 0
-        
-        if direction != self.current_dir and self.current_speed != 0:
-            self.pi.set_PWM_dutycycle(self.pwm_pin, 0)
-            time.sleep(0.05)
-        
-        self.pi.write(self.dir_pin, direction)
-        self.current_dir = direction
-        self.pi.set_PWM_dutycycle(self.pwm_pin, duty)
-        self.current_speed = speed
-        
-    def stop(self):
-        self.pi.set_PWM_dutycycle(self.pwm_pin, 0)
-        self.current_speed = 0.0
-
-def send_video():
-    cap = cv2.VideoCapture(0)
-    
-    # 解像度設定 (640x480)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    
+# --- UDP受信 (映像) ---
+def receive_video():
+    global is_running
     udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    print(f"[*] 映像送信開始 (640x480) -> {PC_IP}:{VIDEO_PORT}")
+    udp_sock.settimeout(1.0)
+    udp_sock.bind((MY_IP, VIDEO_PORT))
+    print(f"[*] 映像待機中: UDP {VIDEO_PORT}")
     
-    while True:
-        ret, frame = cap.read()
-        if not ret: 
-            time.sleep(0.1)
+    # ★変更点: ウィンドウをリサイズ可能に設定
+    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+    
+    while is_running:
+        try:
+            data, addr = udp_sock.recvfrom(65535)
+            nparr = np.frombuffer(data, np.uint8)
+            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            if frame is not None:
+                if VIDEO_ROTATION == 90:
+                    frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+                elif VIDEO_ROTATION == 180:
+                    frame = cv2.rotate(frame, cv2.ROTATE_180)
+                elif VIDEO_ROTATION == 270:
+                    frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+                
+                cv2.imshow(WINDOW_NAME, frame)
+                
+            cv2.waitKey(1)
+        except socket.timeout:
             continue
-        
-        # サーボ角度連動 自動回転ロジック
-        current_tilt_for_video = SHARED_STATE["tilt"]
-        if current_tilt_for_video >= 100:
-            frame = cv2.rotate(frame, cv2.ROTATE_180)
-        
-        _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])
-        
-        if len(buffer) < 65000:
-            try:
-                udp_sock.sendto(buffer, (PC_IP, VIDEO_PORT))
-            except Exception: pass 
-        time.sleep(0.03)
+        except Exception:
+            pass
 
-def receive_control(pi):
-    init_pan_angle = 90
-    init_tilt_angle = 90
-    SHARED_STATE["tilt"] = init_tilt_angle
+    udp_sock.close()
+    cv2.destroyAllWindows()
 
-    # ★ LEDピン設定
-    pi.set_mode(PIN_LED_TAPE, pigpio.OUTPUT)
-    pi.write(PIN_LED_TAPE, 0) # 最初は消灯
+# --- メイン制御ロジック ---
+def main():
+    global is_running, last_sent_json
 
-    try:
-        servo_tilt = DirectServo(pi, PIN_SERVO_TILT, init_angle=init_tilt_angle)
-        servo_pan = DirectServo(pi, PIN_SERVO_PAN, init_angle=init_pan_angle)
-        print(f"[*] サーボ初期化完了")
-    except Exception as e:
-        print(f"[!] サーボエラー: {e}")
-        return
-
-    try:
-        motor_left = MotorController(pi, PIN_PWM_LEFT, PIN_DIR_LEFT)
-        motor_right = MotorController(pi, PIN_PWM_RIGHT, PIN_DIR_RIGHT)
-        print("[*] モーター初期化完了")
-    except Exception as e:
-        print(f"[!] モーターエラー: {e}")
-        return
-
-    tcp_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    tcp_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    tcp_server.bind((MY_IP, CONTROL_PORT))
-    tcp_server.listen(1)
+    # 1. Pygame初期化
+    pygame.init()
     
-    current_tilt = init_tilt_angle
-    current_pan = init_pan_angle
+    # ★変更点: pygame.RESIZABLE を追加してウィンドウサイズ変更を許可
+    screen = pygame.display.set_mode((400, 150), pygame.RESIZABLE)
+    
+    pygame.display.set_caption("Control Panel (Click Here to Control)")
+    font = pygame.font.SysFont(None, 24)
 
-    print(f"[*] 接続待機中: {CONTROL_PORT}")
-
-    while True:
-        conn, addr = tcp_server.accept()
-        print(f"[*] 接続: {addr}")
+    # 2. TCP接続
+    tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        print(f"[*] 接続試行中... {RPI_IP}:{CONTROL_PORT}")
+        tcp_sock.connect((RPI_IP, CONTROL_PORT))
+        print(f"[*] 接続成功！")
         
-        with conn:
-            last_received_data = None
-            while True:
-                try:
-                    data = conn.recv(1024)
-                    if not data: break
-                    received_json_str = data.decode('utf-8').strip()
-                    if not received_json_str: continue
-                    try:
-                        current_data = json.loads(received_json_str)
-                    except json.JSONDecodeError: continue
-                    
-                    if current_data != last_received_data:
-                        last_received_data = current_data
-                        ctl = current_data.get("controller", {})
+        # コンソールヘルプメッセージ
+        print("------------------------------------------------")
+        print("【重要】操作するには「Control Panel」ウィンドウを")
+        print("       クリックしてフォーカスしてください。")
+        print("------------------------------------------------")
+        print(" [W/S]: 左車輪 (前後), [O/L]: 右車輪 (前後)")
+        print(" [3/4]: カメラ上下, [8/9]: カメラ左右")
+        print(" [Q]  : 終了")
+        print("------------------------------------------------")
+    except Exception as e:
+        print(f"[!] 接続失敗: {e}")
+        return
 
-                        raw_ls_y = ctl.get("LS_Y", 0.0)
-                        raw_rs_y = ctl.get("RS_Y", 0.0)
-                        val_ls = raw_ls_y * SPEED_SCALE
-                        val_rs = raw_rs_y * SPEED_SCALE
-                        
-                        motor_left.set_speed(val_rs) 
-                        motor_right.set_speed(-val_ls)
+    # 3. 操作ループ
+    clock = pygame.time.Clock()
 
-                        # Tilt (PIN 18)
-                        hat_y = ctl.get("HAT_Y", 0)
-                        if hat_y != 0:
-                            if hat_y == 1: current_tilt += SERVO_SPEED_TILT
-                            elif hat_y == -1: current_tilt -= SERVO_SPEED_TILT
-                            
-                            current_tilt = max(0, min(180, current_tilt))
-                            servo_tilt.set_angle_instant(current_tilt)
-                            print(f"Tilt: {current_tilt}")
-                            SHARED_STATE["tilt"] = current_tilt
+    while is_running:
+        # Pygameイベント処理
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                is_running = False
+            
+            # ★変更点: ウィンドウサイズ変更イベントの処理
+            elif event.type == pygame.VIDEORESIZE:
+                # 新しいサイズでスクリーンを再設定
+                screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
 
-                        #  Pan (PIN 19) & LED連動ロジック
-                        hat_x = ctl.get("HAT_X", 0)
-                        if hat_x != 0:
-                            if hat_x == 1: current_pan -= SERVO_SPEED_PAN
-                            elif hat_x == -1: current_pan += SERVO_SPEED_PAN
-
-                            # 範囲制限: 上に上がる10度 〜 160度下に下がる
-                            current_pan = max(10, min(160, current_pan))
-                            servo_pan.set_angle_instant(current_pan)
-                            print(f"Pan : {current_pan}")
-
-                            #  LEDトリガー: 10度になったら点灯
-                            if current_pan == 10:
-                                pi.write(PIN_LED_TAPE, 1) # High
-                                # print("LED ON")
-                            else:
-                                pi.write(PIN_LED_TAPE, 0) # Low
-                                # print("LED OFF")
-
-                except Exception as e:
-                    print(f"Loop Error: {e}")
-                    break
+        # 画面描画 (ユーザーへの指示)
+        screen.fill((0, 0, 0))
         
-        print("[!] 切断 - 停止")
-        motor_left.stop()
-        motor_right.stop()
-        servo_pan.move_to_slowly(init_pan_angle) 
-        servo_tilt.move_to_slowly(init_tilt_angle)
-        SHARED_STATE["tilt"] = init_tilt_angle
-        pi.write(PIN_LED_TAPE, 0) # LED消灯
+        # コントロール手法の記述
+        instructions = [
+            "Focus HERE & Press Keys",
+            "---------------------------",
+            "Wheels: [W/S] (Left), [O/L] (Right)",
+            "Camera: [3/4] (Up/Down), [8/9] (Left/Right)",
+            "Quit: [Q]"
+        ]
+        
+        y_offset = 10
+        for line in instructions:
+            text = font.render(line, True, (255, 255, 255))
+            screen.blit(text, (20, y_offset))
+            y_offset += 25
+            
+        pygame.display.flip()
+
+        # キー入力取得
+        keys = pygame.key.get_pressed()
+
+        # 終了チェック
+        if keys[pygame.K_q]:
+            print("\n[!] 終了操作 (Q)")
+            is_running = False
+            break
+
+        # --- 入力判定 ---
+        # 足回り (変更なし)
+        ls_y = 0.0
+        if keys[pygame.K_w]: ls_y = -1.0
+        elif keys[pygame.K_s]: ls_y = 1.0
+
+        rs_y = 0.0
+        if keys[pygame.K_o]: rs_y = -1.0
+        elif keys[pygame.K_l]: rs_y = 1.0
+
+        # カメラ (キー変更)
+        # 上下 (HAT_Y): 5/6 -> 3/4
+        hat_y = 0
+        if keys[pygame.K_3]: hat_y = 1
+        elif keys[pygame.K_4]: hat_y = -1
+        
+        # 左右 (HAT_X): 7/8 -> 8/9
+        hat_x = 0
+        if keys[pygame.K_9]: hat_x = 1 # 9(右) -> HAT_X=1
+        elif keys[pygame.K_8]: hat_x = -1 # 8(左) -> HAT_X=-1 
+
+        # データ作成
+        data = {
+            "controller": {
+                "LS_Y": ls_y,
+                "RS_Y": rs_y,
+                "HAT_X": hat_x,
+                "HAT_Y": hat_y
+            }
+        }
+        json_str = json.dumps(data)
+
+        # 前回と違う場合のみ送信＆ログ表示
+        if json_str != last_sent_json:
+            try:
+                tcp_sock.sendall((json_str + "\n").encode('utf-8'))
+                last_sent_json = json_str # ログ出力位置を修正
+
+                # ログ出力作成
+                log_parts = []
+                # モーター制御はラズパイ側でクロス/反転処理されているため、ここではPC側の入力通りにログを出す
+                if ls_y < 0: log_parts.append("左W:前進")
+                elif ls_y > 0: log_parts.append("左S:後退")
+                
+                if rs_y < 0: log_parts.append("右O:前進")
+                elif rs_y > 0: log_parts.append("右L:後退")
+
+                if hat_y == 1: log_parts.append("Cam3:上")
+                elif hat_y == -1: log_parts.append("Cam4:下")
+                
+                if hat_x == -1: log_parts.append("Cam8:左")
+                elif hat_x == 1: log_parts.append("Cam9:右")
+                
+                if not log_parts:
+                    print("[待機] 入力なし (停止信号送信)")
+                else:
+                    print(f"[送信] {' '.join(log_parts)}")
+                
+            except Exception as e:
+                print(f"[!] 送信エラー: {e}")
+                is_running = False
+                break
+
+        clock.tick(30) # 30FPSでループ
+
+    # 終了処理
+    print("[*] 終了処理中...")
+    stop_data = json.dumps({"controller": {"LS_Y": 0.0, "RS_Y": 0.0, "HAT_X": 0, "HAT_Y": 0}})
+    try:
+        tcp_sock.sendall((stop_data + "\n").encode('utf-8'))
+    except: pass
+    tcp_sock.close()
+    pygame.quit()
+    sys.exit()
 
 if __name__ == "__main__":
-    pi = pigpio.pi()
-    if not pi.connected:
-        print("[!] pigpio未接続")
-        exit()
+    # 映像スレッド開始
+    t = threading.Thread(target=receive_video)
+    t.daemon = True
+    t.start()
+
+    # メインループ
     try:
-        video_thread = threading.Thread(target=send_video)
-        video_thread.daemon = True
-        video_thread.start()
-        receive_control(pi)
-    except KeyboardInterrupt: pass
-    finally:
-        pi.stop()
-        print("[*] 終了")
+        main()
+    except KeyboardInterrupt:
+        pass
