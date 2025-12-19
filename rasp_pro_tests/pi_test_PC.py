@@ -1,5 +1,5 @@
-#rasp2_pc_console_V2.1
-#Window_Resizable
+#rasp2_pc_console_V3
+#Bidirectional_Display
 import cv2
 import socket
 import numpy as np
@@ -21,6 +21,9 @@ is_running = True
 last_sent_json = ""
 WINDOW_NAME = "Camera View (Press Q in Control Window to Quit)"
 
+# ★ ロボットの状態 (FRONT or BACK)
+ROBOT_MODE = "FRONT"
+
 # --- UDP受信 (映像) ---
 def receive_video():
     global is_running
@@ -29,7 +32,6 @@ def receive_video():
     udp_sock.bind((MY_IP, VIDEO_PORT))
     print(f"[*] 映像待機中: UDP {VIDEO_PORT}")
     
-    # ★変更点: ウィンドウをリサイズ可能に設定
     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
     
     while is_running:
@@ -47,94 +49,120 @@ def receive_video():
                     frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
                 
                 cv2.imshow(WINDOW_NAME, frame)
-                
             cv2.waitKey(1)
         except socket.timeout:
             continue
         except Exception:
             pass
-
     udp_sock.close()
     cv2.destroyAllWindows()
+
+# --- ★ V3追加: ステータス受信スレッド ---
+def receive_status_thread(sock):
+    global ROBOT_MODE, is_running
+    buffer = ""
+    print("[*] ステータス受信スレッド開始")
+    
+    while is_running:
+        try:
+            # ラズパイからのデータを受信
+            data = sock.recv(1024)
+            if not data: break
+            
+            buffer += data.decode('utf-8')
+            
+            # 改行区切りでJSONをパース
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                try:
+                    js = json.loads(line)
+                    if "mode" in js:
+                        ROBOT_MODE = js["mode"] # "FRONT" or "BACK"
+                        print(f"[Recv] Mode Updated: {ROBOT_MODE}")
+                except json.JSONDecodeError:
+                    pass
+        except Exception as e:
+            # タイムアウトや切断など
+            if is_running: print(f"[!] Recv Error: {e}")
+            break
 
 # --- メイン制御ロジック ---
 def main():
     global is_running, last_sent_json
 
-    # 1. Pygame初期化
     pygame.init()
+    screen = pygame.display.set_mode((400, 250), pygame.RESIZABLE) # 少し縦長に
+    pygame.display.set_caption("Control Panel")
     
-    # ★変更点: pygame.RESIZABLE を追加してウィンドウサイズ変更を許可
-    screen = pygame.display.set_mode((400, 150), pygame.RESIZABLE)
-    
-    pygame.display.set_caption("Control Panel (Click Here to Control)")
-    font = pygame.font.SysFont(None, 24)
+    # フォント設定 (Windows 11想定: メイリオ)
+    try:
+        font_small = pygame.font.SysFont("meiryo", 20)
+        font_big = pygame.font.SysFont("meiryo", 60, bold=True) # 巨大フォント
+    except:
+        font_small = pygame.font.SysFont(None, 24)
+        font_big = pygame.font.SysFont(None, 100)
 
-    # 2. TCP接続
+    # TCP接続
     tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         print(f"[*] 接続試行中... {RPI_IP}:{CONTROL_PORT}")
         tcp_sock.connect((RPI_IP, CONTROL_PORT))
         print(f"[*] 接続成功！")
-        
-        # コンソールヘルプメッセージ
-        print("------------------------------------------------")
-        print("【重要】操作するには「Control Panel」ウィンドウを")
-        print("       クリックしてフォーカスしてください。")
-        print("------------------------------------------------")
-        print(" [W/S]: 左車輪 (前後), [O/L]: 右車輪 (前後)")
-        print(" [3/4]: カメラ上下, [8/9]: カメラ左右")
-        print(" [Q]  : 終了")
-        print("------------------------------------------------")
     except Exception as e:
         print(f"[!] 接続失敗: {e}")
         return
 
-    # 3. 操作ループ
+    # ★ V3追加: 受信スレッド起動
+    recv_thread = threading.Thread(target=receive_status_thread, args=(tcp_sock,))
+    recv_thread.daemon = True
+    recv_thread.start()
+
     clock = pygame.time.Clock()
 
     while is_running:
-        # Pygameイベント処理
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 is_running = False
-            
-            # ★変更点: ウィンドウサイズ変更イベントの処理
             elif event.type == pygame.VIDEORESIZE:
-                # 新しいサイズでスクリーンを再設定
                 screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
 
-        # 画面描画 (ユーザーへの指示)
         screen.fill((0, 0, 0))
         
-        # コントロール手法の記述
+        # --- 描画処理 ---
+        
+        # 1. 巨大な状態表示
+        if ROBOT_MODE == "FRONT":
+            # 緑色で「前」
+            text_mode = font_big.render("前", True, (0, 255, 0))
+        else:
+            # 赤色で「後」
+            text_mode = font_big.render("後ろ", True, (255, 50, 50))
+            
+        # 中央に配置
+        rect_mode = text_mode.get_rect(center=(screen.get_width()//2, 80))
+        screen.blit(text_mode, rect_mode)
+
+        # 2. 操作ガイド
         instructions = [
-            "Focus HERE & Press Keys",
-            "---------------------------",
-            "Wheels: [W/S] (Left), [O/L] (Right)",
-            "Camera: [3/4] (Up/Down), [8/9] (Left/Right)",
+            "-------------北条専用機体-------------",
+            "Move: 左[W/S], 右[O/L] ",
+            "Cam: [3/4] (前/後ろ), [8/9] (上/下)",
             "Quit: [Q]"
         ]
-        
-        y_offset = 10
+        y_offset = 160
         for line in instructions:
-            text = font.render(line, True, (255, 255, 255))
+            text = font_small.render(line, True, (200, 200, 200))
             screen.blit(text, (20, y_offset))
             y_offset += 25
             
         pygame.display.flip()
 
-        # キー入力取得
+        # キー入力
         keys = pygame.key.get_pressed()
-
-        # 終了チェック
         if keys[pygame.K_q]:
-            print("\n[!] 終了操作 (Q)")
             is_running = False
             break
 
-        # --- 入力判定 ---
-        # 足回り (変更なし)
         ls_y = 0.0
         if keys[pygame.K_w]: ls_y = -1.0
         elif keys[pygame.K_s]: ls_y = 1.0
@@ -143,63 +171,34 @@ def main():
         if keys[pygame.K_o]: rs_y = -1.0
         elif keys[pygame.K_l]: rs_y = 1.0
 
-        # カメラ (キー変更)
-        # 上下 (HAT_Y): 5/6 -> 3/4
         hat_y = 0
         if keys[pygame.K_3]: hat_y = 1
         elif keys[pygame.K_4]: hat_y = -1
         
-        # 左右 (HAT_X): 7/8 -> 8/9
         hat_x = 0
-        if keys[pygame.K_9]: hat_x = 1 # 9(右) -> HAT_X=1
-        elif keys[pygame.K_8]: hat_x = -1 # 8(左) -> HAT_X=-1 
+        if keys[pygame.K_9]: hat_x = 1 
+        elif keys[pygame.K_8]: hat_x = -1 
 
-        # データ作成
         data = {
             "controller": {
-                "LS_Y": ls_y,
-                "RS_Y": rs_y,
-                "HAT_X": hat_x,
-                "HAT_Y": hat_y
+                "LS_Y": ls_y, "RS_Y": rs_y,
+                "HAT_X": hat_x, "HAT_Y": hat_y
             }
         }
         json_str = json.dumps(data)
 
-        # 前回と違う場合のみ送信＆ログ表示
         if json_str != last_sent_json:
             try:
                 tcp_sock.sendall((json_str + "\n").encode('utf-8'))
-                last_sent_json = json_str # ログ出力位置を修正
-
-                # ログ出力作成
-                log_parts = []
-                # モーター制御はラズパイ側でクロス/反転処理されているため、ここではPC側の入力通りにログを出す
-                if ls_y < 0: log_parts.append("左W:前進")
-                elif ls_y > 0: log_parts.append("左S:後退")
-                
-                if rs_y < 0: log_parts.append("右O:前進")
-                elif rs_y > 0: log_parts.append("右L:後退")
-
-                if hat_y == 1: log_parts.append("Cam3:上")
-                elif hat_y == -1: log_parts.append("Cam4:下")
-                
-                if hat_x == -1: log_parts.append("Cam8:左")
-                elif hat_x == 1: log_parts.append("Cam9:右")
-                
-                if not log_parts:
-                    print("[待機] 入力なし (停止信号送信)")
-                else:
-                    print(f"[送信] {' '.join(log_parts)}")
-                
+                last_sent_json = json_str
             except Exception as e:
                 print(f"[!] 送信エラー: {e}")
                 is_running = False
                 break
 
-        clock.tick(30) # 30FPSでループ
+        clock.tick(30)
 
-    # 終了処理
-    print("[*] 終了処理中...")
+    # 終了
     stop_data = json.dumps({"controller": {"LS_Y": 0.0, "RS_Y": 0.0, "HAT_X": 0, "HAT_Y": 0}})
     try:
         tcp_sock.sendall((stop_data + "\n").encode('utf-8'))
@@ -209,12 +208,9 @@ def main():
     sys.exit()
 
 if __name__ == "__main__":
-    # 映像スレッド開始
     t = threading.Thread(target=receive_video)
     t.daemon = True
     t.start()
-
-    # メインループ
     try:
         main()
     except KeyboardInterrupt:
