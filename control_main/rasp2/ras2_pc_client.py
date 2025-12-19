@@ -10,11 +10,11 @@ import json
 import sys
 
 # --- 設定 ---
-MY_IP = "0.0.0.0" 
+MY_IP = "0.0.0.0"
 VIDEO_PORT = 5005
 RPI_IP = "192.168.50.20"
 CONTROL_PORT = 5006
-VIDEO_ROTATION = 270 
+VIDEO_ROTATION = 270
 
 # グローバル変数
 is_running = True
