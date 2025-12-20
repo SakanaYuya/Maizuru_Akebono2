@@ -1,5 +1,5 @@
 # Maizuru_Akebono2
-廃炉ロボコン2025における舞鶴高専チーム**あけぼの**リポジトリ
+第10回廃炉創造ロボコンにおける舞鶴高専チーム**あけぼの**リポジトリ
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)
 ![License](https://img.shields.io/github/license/Yuura/Maizuru_Akebono2)
@@ -13,6 +13,8 @@
 > 内橋 慧悟　**[ECD]**
 
 > 北条 博輝　**[CAD]**
+
+> 池田 紗也野 **[SSV]** 
 
 > 宮川 颯季　**[Fitter]**
 
