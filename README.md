@@ -1,3 +1,5 @@
+![Image](https://github.com/user-attachments/assets/413d25ed-5a99-4a6b-b6ef-747a933e8249)
+
 # Maizuru_Akebono2
 第10回廃炉創造ロボコンにおける舞鶴高専チーム[まいづる]リポジトリへようこそ
 
