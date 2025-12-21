@@ -1,5 +1,5 @@
 # Maizuru_Akebono2
-第10回廃炉創造ロボコンにおける舞鶴高専チーム**あけぼの**リポジトリ
+第10回廃炉創造ロボコンにおける舞鶴高専チーム[まいづる]リポジトリへようこそ
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)
 ![License](https://img.shields.io/github/license/Yuura/Maizuru_Akebono2)
@@ -25,6 +25,21 @@
 > 高岡 優　**[PG (Super Supporter)]**
 
 > 坂田 雄哉　**[PG (Repository Host)]**
+
+## Team details
+- チーム:まいづる
+- 機体名:あけぼのII  
+[特徴]
+Main機体(rasp1)とSub機体(rasp2)による高度な連携のもと、**爆速**デブリ回収&帰還をコンセプトとした作品 
+
+## Team log
+> 12/17 現地入り
+
+> 12/18~/19 試走
+
+> 12/20 **"アイデア賞"受賞**
+
+# Details of the work are as follows:
 
 ## Commit Rules
 コミットメッセージの初めには必ず prefix をつける様にしましょう.  
