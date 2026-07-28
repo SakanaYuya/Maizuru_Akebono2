@@ -358,7 +358,7 @@ loadから、
 - rasp1の場合[pi_server.py]を起動  
 [pi_server.pyの場所はこちら](control_main/rasp1/pi_server.py)
 - rasp2の場合[ras2_pi_server.py]を起動  
-[ras2_pi_server.pyの場所はこちら](control_main/rasp2/ras2_pi_server.py)
+[ras2_pi_server.pyの場所はこちら](control_main/rasp2/ras2_pi_server.py)  
 6.プログラムを[RUN]したのち、ログに接続が出てくることを確認  
 **Caution:** Waningと出ますが、**正常動作です**
 
