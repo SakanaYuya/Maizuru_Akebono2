@@ -334,6 +334,7 @@ python3 --version
 # [実際実行手順実]
 以下手順を上から順番に実行してください
 
+[下準備]
 ## ラズパイの起動と疎通確認
 1.ラズパイに電源投入  
 **Caution**"先にSDカードを入れてください"
@@ -352,17 +353,17 @@ ssh hairobo@rasp1
 Rasp1/Rasp2を選択、ラズパイのVNC接続を確立したのち、**「リモートデスクトップ」でのアクセスができることを確認**
 
 ## [RaspberryPi側操作]  
-1.デスクトップ左上から、[プログラミング]>[Thony]をクリック
+5.デスクトップ左上から、[プログラミング]>[Thony]をクリック
 loadから、  
 - rasp1の場合[pi_server.py]を起動  
 [pi_server.pyの場所はこちら](control_main/rasp1/pi_server.py)
 - rasp2の場合[ras2_pi_server.py]を起動  
 [ras2_pi_server.pyの場所はこちら](control_main/rasp2/ras2_pi_server.py)
-2.プログラムを[RUN]したのち、ログに接続が出てくることを確認  
+6.プログラムを[RUN]したのち、ログに接続が出てくることを確認  
 **Caution:** Waningと出ますが、**正常動作です**
 
 ## [Windows側操作]  
-2.VScodeから、cloneしたフォルダ階層を開いて、**venv環境下において**以下プログラムをpythonで実行
+7.VScodeから、cloneしたフォルダ階層を開いて、**venv環境下において**以下プログラムをpythonで実行
 - rasp1の場合[pc_client.py]を実行  
 [pc_client.pyの場所はこちら](control_main/rasp1/pc_client.py)
 - rasp2の場合[ras2_pc_client.py]を実行  
